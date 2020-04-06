@@ -1,0 +1,15 @@
+<ImageController>:
+    canvas:
+        Color:
+            rgba: 1, 0, 0, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgb: 1, 1, 1
+        Ellipse:
+            pos: self.cursor_pos
+            size: (self.cursor_size, self.cursor_size)
+    Label:
+        id: label_widget
+        text: "Hello World"
