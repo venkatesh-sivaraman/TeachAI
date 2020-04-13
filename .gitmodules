@@ -1,0 +1,3 @@
+[submodule "pyleap"]
+	path = pyleap
+	url = git@github.com:eranegozy/pyleap.git
