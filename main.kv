@@ -1,3 +1,25 @@
+<MainWidget>:
+    FloatLayout:
+        ImageController:
+            id: image_controller
+            pos_hint: {'x': 0, 'y': 0}
+            size_hint: (1, 1)
+        ConfirmDialog:
+            id: confirm_dialog
+            pos_hint: {'x': 0, 'y': 0}
+            size_hint: (1, 1)
+            opacity: 0.0
+            disabled: True
+    Widget:
+        pos: (0, 0)
+        size: root.size
+        canvas:
+            Color:
+                rgb: 1, 1, 1
+            Ellipse:
+                pos: root.cursor_pos
+                size: (root.cursor_size, root.cursor_size)
+ 
 <ImageController>:
     BoxLayout:
         canvas:
@@ -12,34 +34,51 @@
         Label:
             id: label_widget
             size_hint: 1, 0.1
-            text: "Describe and point to elements that you see in this image."
+            text: "Describe and point to the animals in this image."
         BoxLayout:
             size_hint: 1, 0.1
             pos_hint: {'center_x': 0.5}
             SpeechWidget:
                 id: speech_widget
                 size: (100, 40)
-        ImageContainer:
-            image_source: root.image_src
-            size_hint: 1, 0.8
-            id: image_view
-    Widget:
-        pos: (0, 0)
-        size: root.size
-        canvas:
-            Color:
-                rgb: 1, 1, 1
-            Ellipse:
-                pos: root.cursor_pos
-                size: (root.cursor_size, root.cursor_size)
+        FloatLayout:
+            size_hint: 1, 0.7
+            ImageContainer:
+                pos_hint: {'x': 0, 'y': 0}
+                size_hint: (1, 1)
+                image_source: root.image_src
+                id: image_view
+            AnnotationsView:
+                pos_hint: {'x': 0, 'y': 0}
+                size_hint: (1, 1)
+                id: annotations_view
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint: 1, 0.1
+            LeapButton:
+                text: "Redo this image"
+                size_hint: 0.5, 1
+                id: redo_button
+            LeapButton:
+                text: "I'm done with this image"
+                size_hint: 0.5, 1
+                id: done_button
+                disabled: True # disable until first annotation
 
 <ImageContainer>:
     Image:
         allow_stretch: True
         keep_ratio: True
-        pos: (0, 0)
-        size: root.size
+        pos_hint: {'x': 0, 'y': 0}
+        size_hint: (1, 1)
         source: root.image_source
+    Image:
+        opacity: 1 if root.overlay_source else 0
+        allow_stretch: True
+        keep_ratio: True
+        pos_hint: {'x': 0, 'y': 0}
+        size_hint: (1, 1)
+        source: root.overlay_source
 
 <GestureDrawing>:
     canvas:
@@ -53,15 +92,25 @@
 
 <SpeechWidget>:
     num_bars: 9
-    color: 0, 1, 1, 1
+    color: 0.5, 0.5, 0.5, 1
 
 <ConfirmDialog>:
     canvas:
         Color:
-            rgba: 0, 0, 0.1, 0.8
+            rgba: 0, 0, 0.1, 0.9
         Rectangle:
             pos: self.pos
             size: self.size
+        Color:
+            rgba: self.left_color
+        Rectangle:
+            pos: self.pos
+            size: (self.size[0] / 2, self.size[1])
+        Color:
+            rgba: self.right_color
+        Rectangle:
+            pos: (self.pos[0] + self.size[0] / 2, self.pos[1])
+            size: (self.size[0] / 2, self.size[1])
     BoxLayout:
         pos: (0, 0)
         size: root.size
@@ -72,6 +121,26 @@
             text: "Hover left to re-do, hover right to confirm."
         ImageContainer:
             image_source: root.image_src
-            size_hint: 1, 0.8
+            size_hint: 1, 0.6
             id: image_view
+        Label:
+            id: transcript_widget
+            size_hint: 1, 0.2
+            text: "Transcript: " + root.transcript
 
+<LeapButton>:
+    canvas:
+        Color:
+            rgba: self.hover_color
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    AnchorLayout:
+        pos: root.pos
+        size: root.size
+        Label:
+            text: "[b]" + root.text + "[/b]"
+            opacity: 0.5 if root.disabled else 1.0
+            markup: True
+            anchor_x: "center"
+            anchor_y: "center"

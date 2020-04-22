@@ -6,14 +6,15 @@ import pyaudio
 import wave
 import matplotlib.pyplot as plt
 import io
+import os
 from google.cloud import speech_v1
 import colorsys
+import threading
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100
 CHUNK = 1024
-
 
 class SpeechWidget(Widget):
     """
@@ -21,9 +22,9 @@ class SpeechWidget(Widget):
     """
 
     num_bars = NumericProperty(5)
-    color = ListProperty([1, 1, 1, 1])
+    color = ListProperty([0.5, 0.5, 0.5, 1])
     bar_width = 32.0
-    transcript = ObjectProperty(None)
+    transcript = ObjectProperty(None, allownone=True)
 
     def __init__(self, **kwargs):
         super(SpeechWidget, self).__init__(**kwargs)
@@ -33,10 +34,23 @@ class SpeechWidget(Widget):
         self.frequencies = []
         self.amplitudes = []
         self.last_volumes = []
+        self.is_recording = False
+        self.is_transcribing = False
         self.audio = pyaudio.PyAudio()
         self.reset()
+        self.on_silence = None
+        #self.audio_queue = mp.Queue()
+        #self.transcript_queue = mp.Queue()
+        #self.transcription_process = mp.Process(target=speech_transcription_worker,
+        #                                        args=(self.audio_queue, self.transcript_queue,
+        #                                              os.environ['GOOGLE_APPLICATION_CREDENTIALS']))
+        #self.transcription_process.start()
+        self.lock = threading.Lock()
 
     def reset(self):
+        if self.is_recording:
+            self.stop_recording(False)
+        self.color = [0.5, 0.5, 0.5, 1]
         self.current_time = 0
         self.frames_since_sound = 0
         self.had_sound = False
@@ -75,28 +89,40 @@ class SpeechWidget(Widget):
 
         avg_volume = sum(self.last_volumes) / len(self.last_volumes)
         if self.had_sound and avg_volume < self.max_volume * 0.4:
-            self.frames_since_sound += 1
-            if self.frames_since_sound * CHUNK / RATE >= 3:
-                self.should_stop_rec = True
-                return (None, pyaudio.paComplete)
+            pass
+            # self.frames_since_sound += 1
+            # if self.frames_since_sound * CHUNK / RATE >= 2:
+            #     self.should_stop_rec = True
+            #     print("Silence")
+            #     if self.on_silence:
+            #         self.on_silence()
+            #     return (None, pyaudio.paComplete)
         else:
-            if avg_volume > 0.1:
+            if avg_volume > 0.25 and not self.had_sound:
+                print("Had sound")
                 self.had_sound = True
             self.frames_since_sound = 0
             self.max_volume = max(avg_volume, self.max_volume)
 
         self.amplitudes = np.hanning(self.num_bars) * avg_volume
-        self.color = (*colorsys.hsv_to_rgb((1 - avg_volume) * 0.7, 0.6, 0.9), 1)
+        if self.had_sound:
+            self.color = (*colorsys.hsv_to_rgb((1 - avg_volume) * 0.7, 0.6, 0.9), 1)
         return (None, pyaudio.paContinue)
 
-    def stop_recording(self):
+    def stop_recording(self, transcribe=True):
+        if not self.is_recording:
+            return
         print("Finished recording")
         self.is_recording = False
         self.stream.stop_stream()
         self.stream.close()
         self.buffer.close()
-        self.audio.terminate()
-        self.transcribe()
+        if transcribe:
+            self.is_transcribing = True
+            buf = self.trim_audio()
+            value = buf.getvalue()
+            t = threading.Thread(target=self.transcribe, args=(value,))
+            t.start()
 
     def on_num_bars(self, instance, value):
         # Set the frequencies and amplitudes
@@ -106,9 +132,15 @@ class SpeechWidget(Widget):
         self.amplitudes = np.hanning(value) * 0.1
 
     def update(self, dt):
-        if self.should_stop_rec:
-            self.stop_recording()
-            self.should_stop_rec = False
+        # if self.should_stop_rec:
+        #     self.stop_recording()
+        #     self.should_stop_rec = False
+
+        # try:
+        #     transcript = self.transcript_queue.get_nowait()
+        #     self.transcript = transcript
+        # except:
+        #     pass
 
         self.color_elem.rgba = self.color
         center_pos = (self.pos[0] + self.size[0] / 2, self.pos[1] + self.size[1] / 2)
@@ -150,7 +182,7 @@ class SpeechWidget(Widget):
         thresh = np.max(energies) * 0.1
 
         # Max filter
-        max_window_len = int(RATE / hop_size) # 1 second windows
+        max_window_len = int(RATE / hop_size) * 2 # 1 second windows
         filtered_energies = []
         for frame in range(len(energies)):
             filtered_energies.append(np.max(energies[max(frame - max_window_len // 2, 0):frame + max_window_len // 2]))
@@ -170,44 +202,45 @@ class SpeechWidget(Widget):
             file.write(buf.getvalue())
         return buf
 
-    def transcribe(self):
+    def transcribe(self, value):
         """Loads the audio from the current buffer and performs speech-to-text."""
-        buf = self.trim_audio()
-
+        print("Trimming")
         client = speech_v1.SpeechClient()
-
         config = {
             "enable_word_time_offsets": True,
             "language_code": "en-US",
         }
-        audio = {"content": buf.getvalue()}
+        audio = {"content": value}
 
         print("Recognizing...")
         response = client.recognize(config, audio)
+        print("Finished recognizing")
 
         # The first result includes start and end time word offsets
-        result = response.results[0]
         # First alternative is the most probable result
-        alternative = result.alternatives[0]
-        print(u"Transcript: {}".format(alternative.transcript))
-        # Print the start and end time of each word
-        for word in alternative.words:
-            print(u"Word: {}".format(word.word))
-            print(
-                u"Start time: {} seconds {} nanos".format(
-                    word.start_time.seconds, word.start_time.nanos
-                )
-            )
-            print(
-                u"End time: {} seconds {} nanos".format(
-                    word.end_time.seconds, word.end_time.nanos
-                )
-            )
+        # alternative = result.alternatives[0]
+        transcript = ', '.join([result.alternatives[0].transcript for result in response.results])
+        print(u"Transcript: {}".format(transcript))
+        # plt.figure()
+        # all_data = np.frombuffer(buf.getvalue(), dtype=np.int16).astype(float) / 32768
+        # plt.plot(all_data)
+        # plt.title(alternative.transcript)
+        # plt.show()
+        # Merge all results into one object
+        result_obj = {'transcript': transcript}
+        timestamps = []
+        for result in response.results:
+            for word in result.alternatives[0].words:
+                timestamps.append({
+                    'word': word.word,
+                    'start_time': word.start_time.seconds + word.start_time.nanos / 1e9,
+                    'end_time': word.end_time.seconds + word.end_time.nanos / 1e9
+                })
+        result_obj['timestamps'] = timestamps
 
-        plt.figure()
-        all_data = np.frombuffer(buf.getvalue(), dtype=np.int16).astype(float) / 32768
-        plt.plot(all_data)
-        plt.title(alternative.transcript)
-        plt.show()
-        self.transcript = alternative
+        self.lock.acquire()
+        self.transcript = result_obj
+        self.is_transcribing = False
+        self.lock.release()
+        #self.audio_queue.put_nowait(buf.getvalue())
 

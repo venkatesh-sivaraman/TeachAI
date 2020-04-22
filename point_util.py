@@ -23,19 +23,22 @@ def convert_point_to_descendant(point, ancestor, descendant):
     """Converts a point where ancestor is known to be above descendant in the widget tree."""
     if descendant == ancestor:
         return point
-    current = descendant.parent
-    parents = [current]
+    current = descendant
+    parents = []
     while current != ancestor:
-        current = current.parent
         parents.append(current)
+        current = current.parent
     result = point
     for widget in parents:
+        print(widget, widget.pos)
         result = (result[0] - widget.pos[0], result[1] - widget.pos[1])
     return result
 
 def convert_point(point, from_widget, to_widget):
     """Converts the given point from the source widget to the destination widget."""
 
+    if point is None:
+        return None
     # Obtain the two widget's ancestor lists and find the most recent common ancestor
     src_ancestors = get_ancestors(from_widget)
     dest_ancestors = get_ancestors(to_widget)
@@ -50,6 +53,8 @@ def convert_point(point, from_widget, to_widget):
 
     # Now walk up the tree from from_widget to the MRCA, and back down to to_widget
     mrca_pt = convert_point_to_ancestor(point, from_widget, src_mrca)
-    return convert_point_to_descendant(point, src_mrca, to_widget)
+    result = convert_point_to_descendant(point, src_mrca, to_widget)
+    print(point, from_widget, src_mrca, mrca_pt, to_widget, result)
+    return result
 
 

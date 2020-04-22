@@ -12,6 +12,7 @@ class Region:
         template_image = np.ones((*self.values.shape, 4))
         template_image[:,:,:3] *= np.array(rgb)
         template_image[:,:,3] = self.values / np.max(self.values)
+        template_image = np.flip(template_image, axis=0)
         img = Image.fromarray(np.uint8(template_image * 255))
         if not os.path.exists("tmp"):
             os.mkdir("tmp")
@@ -35,7 +36,52 @@ def resample_points(points):
     f = interp1d(distances, points.T, kind='linear')
     return f(np.linspace(0, distances[-1], 20)).T
 
-def detect_region(points, image_size):
+def detect_region(points, image_size, mask_size):
+    """Another method for detecting regions."""
+    # Build a density map of input points
+    bins = {}
+    weighted_bins = {} # weighted by depth coordinate
+    bin_size = (image_size[0] // mask_size[1], image_size[1] // mask_size[0])
+
+    max_count = 0
+    max_weight = 0
+    for i, point in enumerate(points):
+        x_bin = np.clip(int(np.round(point[0] / bin_size[0])), 0, mask_size[1] - 1)
+        y_bin = np.clip(int(np.round(point[1] / bin_size[1])) + 1, 0, mask_size[0] - 1)
+        bins.setdefault((x_bin, y_bin), []).append(i)
+        weighted_bins[(x_bin, y_bin)] = weighted_bins.get((x_bin, y_bin), 0.0) + point[2]
+        max_weight = max(max_weight, weighted_bins[(x_bin, y_bin)])
+        max_count = max(max_count, len(bins[(x_bin, y_bin)]))
+    # mat = np.zeros(mask_size)
+    # for (x, y), idxs in bins.items():
+    #     mat[y, x] = len(idxs)
+    # print(mat)
+
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # plt.scatter([x for x, y in points], [y for x, y in points])
+    # plt.xlim(0, image_size[0])
+    # plt.ylim(0, image_size[1])
+    # plt.subplot(1, 2, 2)
+    # plt.imshow(mat)
+    # plt.show()
+
+    # Get the bins that have several points
+    def include_bin(bin_id):
+        return (len(bins[bin_id]) > min(max_count * 0.5, len(points) * 0.1) or
+                weighted_bins[bin_id] >= max_weight * 0.6)
+    in_bins = [bin_id for bin_id in bins if include_bin(bin_id)]
+    in_idxs = [i for bin_id in in_bins for i in bins[bin_id]]
+
+    mask = np.zeros(mask_size)
+    for i in range(min(in_idxs), max(in_idxs) + 1):
+        x_bin = np.clip(int(np.round(points[i][0] / bin_size[0])), 0, mask_size[1] - 1)
+        y_bin = np.clip(int(np.round(points[i][1] / bin_size[1])), 0, mask_size[0] - 1)
+        mask[y_bin, x_bin] = 1
+
+    return mask
+
+def detect_region_probabilistic(points, image_size):
     """
     Identifies a region of the image being highlighted by the given set of points, where the
     region is described by the probability of each pixel in the image being within the region

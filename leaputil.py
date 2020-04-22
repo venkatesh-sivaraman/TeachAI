@@ -11,69 +11,69 @@
 # For complete documentation see:
 # https://developer.leapmotion.com/documentation/v2/python/index.html
 
-import platform
-import sys
-import numpy as np
-import os
-import os.path
-
-common_dir_path = os.path.dirname(os.path.realpath(__file__))
-
-def fixLeapLib():
-    import subprocess
-    def runProcess(*cmd):
-        print(' '.join(cmd))
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE) #, stderr=subprocess.STDOUT)
-        output = []
-        while(True):
-          retcode = p.poll() #returns None while subprocess is running
-          line = p.stdout.readline() 
-          line = line.decode('utf-8') # subprocess returns a binary string. convert to normal string
-          if(retcode is not None):
-            break
-          line = line.strip()
-          if line:
-            output.append(line)
-        return output
-
-    # the leap library to be fixed up:
-    leap_lib = os.path.join(common_dir_path, 'leap/osx/LeapPython.so')
-
-    # find current location of python lib
-    out = runProcess('otool', '-L', leap_lib)
-    if not out:
-        print('Error: cannot find ', leap_lib)
-        sys.exit()
-    cur_lib_loc = out[3].split(' ')[0]
-    print('cur_lib_loc is', cur_lib_loc)
-
-    # create proper location of libpython3.6m.dylib (assumes miniconda or brew installation)
-    lib_path = list( filter(lambda x: 'lib' in x, sys.path) )[0]
-    proper_lib_loc = lib_path.split('/lib/')[0] + '/lib/libpython3.7m.dylib'
-    print('proper_lib_loc is', proper_lib_loc)
-
-    if not os.path.exists(proper_lib_loc) :
-        print('Error:', proper_lib_loc, 'does not exist when trying to patch LeapPython.so')
-        return
-
-    if cur_lib_loc != proper_lib_loc:
-        print('modifying:')
-        out = runProcess('install_name_tool', '-add_rpath', proper_lib_loc, leap_lib) #'-change', cur_lib_loc, proper_lib_loc, leap_lib)
-        print(out)
-    else:
-        print('LeapPython.so is already OK')
-
-# Find the right library to load based on platform
-if platform.system() == 'Windows':
-    sys.path.append(os.path.join(common_dir_path, 'leap/x64'))
-elif platform.system() == 'Darwin':
-    sys.path.append("leap")
-    #sys.path.append(os.path.join(common_dir_path, 'leap/osx'))
-    #fixLeapLib()
-elif platform.system() == 'Linux':
-    sys.path.append(os.path.join(common_dir_path, 'leap/linux'))
-
-import Leap
+# import platform
+# import sys
+# import numpy as np
+# import os
+# import os.path
+# 
+# common_dir_path = os.path.dirname(os.path.realpath(__file__))
+# 
+# def fixLeapLib():
+#     import subprocess
+#     def runProcess(*cmd):
+#         print(' '.join(cmd))
+#         p = subprocess.Popen(cmd, stdout=subprocess.PIPE) #, stderr=subprocess.STDOUT)
+#         output = []
+#         while(True):
+#           retcode = p.poll() #returns None while subprocess is running
+#           line = p.stdout.readline() 
+#           line = line.decode('utf-8') # subprocess returns a binary string. convert to normal string
+#           if(retcode is not None):
+#             break
+#           line = line.strip()
+#           if line:
+#             output.append(line)
+#         return output
+# 
+#     # the leap library to be fixed up:
+#     leap_lib = os.path.join(common_dir_path, 'leap/osx/LeapPython.so')
+# 
+#     # find current location of python lib
+#     out = runProcess('otool', '-L', leap_lib)
+#     if not out:
+#         print('Error: cannot find ', leap_lib)
+#         sys.exit()
+#     cur_lib_loc = out[3].split(' ')[0]
+#     print('cur_lib_loc is', cur_lib_loc)
+# 
+#     # create proper location of libpython3.6m.dylib (assumes miniconda or brew installation)
+#     lib_path = list( filter(lambda x: 'lib' in x, sys.path) )[0]
+#     proper_lib_loc = lib_path.split('/lib/')[0] + '/lib/libpython3.7m.dylib'
+#     print('proper_lib_loc is', proper_lib_loc)
+# 
+#     if not os.path.exists(proper_lib_loc) :
+#         print('Error:', proper_lib_loc, 'does not exist when trying to patch LeapPython.so')
+#         return
+# 
+#     if cur_lib_loc != proper_lib_loc:
+#         print('modifying:')
+#         out = runProcess('install_name_tool', '-add_rpath', proper_lib_loc, leap_lib) #'-change', cur_lib_loc, proper_lib_loc, leap_lib)
+#         print(out)
+#     else:
+#         print('LeapPython.so is already OK')
+# 
+# # Find the right library to load based on platform
+# if platform.system() == 'Windows':
+#     sys.path.append(os.path.join(common_dir_path, 'leap/x64'))
+# elif platform.system() == 'Darwin':
+#     sys.path.append("leap")
+#     #sys.path.append(os.path.join(common_dir_path, 'leap/osx'))
+#     #fixLeapLib()
+# elif platform.system() == 'Linux':
+#     sys.path.append(os.path.join(common_dir_path, 'leap/linux'))
+# 
+# import Leap
 
 # Return 3 lines of text about status of leap motion controller
 def leap_info(leap):

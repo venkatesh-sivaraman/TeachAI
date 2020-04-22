@@ -4,13 +4,79 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.properties import *
 from kivy.graphics.instructions import InstructionGroup
-from kivy.graphics import Ellipse, Color
+from kivy.clock import Clock
+from kivy.graphics import Ellipse, Color, Rectangle
 import numpy as np
 from point_util import *
 from region_detector import *
+from classification import *
+from labeling import *
+import PIL
+import time
 
 class ImageContainer(FloatLayout):
     image_source = StringProperty('test_image.jpg')
+    overlay_source = StringProperty('', allownone=True)
+    image_size = ListProperty([0, 0])
+
+    def on_image_source(self, instance, value):
+        if value:
+            img = PIL.Image.open(value)
+            self.image_size = img.size
+        else:
+            self.image_size = [0, 0]
+
+    def convert_point_to_image(self, point):
+        aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
+        start_x = self.size[0] / 2.0 - self.image_size[0] / 2.0 / aspect_ratio
+        start_y = self.size[1] / 2.0 - self.image_size[1] / 2.0 / aspect_ratio
+        result = ((point[0] - start_x) * aspect_ratio,
+                self.image_size[1] - (point[1] - start_y) * aspect_ratio)
+        return result
+
+    def convert_point_from_image(self, point):
+        aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
+        start_x = self.size[0] / 2.0 - self.image_size[0] / 2.0 / aspect_ratio
+        start_y = self.size[1] / 2.0 - self.image_size[1] / 2.0 / aspect_ratio
+        return (point[0] / aspect_ratio + start_x,
+                (self.image_size[1] - point[1]) / aspect_ratio + start_y)
+
+label_colors = [
+    (1, 0, 0, 0.3),
+    (0, 1, 0, 0.3),
+    (0, 0.6, 1, 0.3)
+]
+temporary_color = (0.1, 0.1, 0.1, 0.5)
+known_labels = []
+
+class AnnotationsView(Widget):
+    annotations = ListProperty([])
+    image_size = ListProperty([0, 0])
+
+    def on_annotations(self, instance, value):
+        self.canvas.clear()
+
+        # Compute origin of image based on aspect ratio
+        aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
+        start_x = self.pos[0] + self.size[0] / 2.0 - self.image_size[0] / 2.0 / aspect_ratio
+        start_y = self.pos[1] + self.size[1] / 2.0 + self.image_size[1] / 2.0 / aspect_ratio
+        with self.canvas:
+            for region in self.annotations:
+                tile_width = self.image_size[0] / aspect_ratio / region.mask.shape[1]
+                tile_height = self.image_size[1] / aspect_ratio / region.mask.shape[0]
+                if region.label not in known_labels:
+                    known_labels.append(region.label)
+                if region.temporary:
+                    Color(*temporary_color)
+                else:
+                    Color(*label_colors[known_labels.index(region.label) % len(label_colors)])
+
+                for y in range(region.mask.shape[0]):
+                    for x in range(region.mask.shape[1]):
+                        if region.mask[y,x] == 0: continue
+                        Rectangle(pos=(start_x + x * tile_width,
+                                       start_y - (y + 1) * tile_height),
+                                  size=(tile_width, tile_height))
 
 class GestureDrawing(Widget):
 
@@ -60,70 +126,180 @@ class CursorTrail(InstructionGroup):
         self.points.pop(0)
         self.update_instructions()
 
+HOVER_TOLERANCE = 20.0
+
 class ImageController(FloatLayout):
 
-    cursor_pos = ListProperty([0, 0])
-    cursor_size = NumericProperty(0.0)
-    segmentation = ObjectProperty(None)
+    segmentation = ObjectProperty(None, allownone=True)
     image_src = StringProperty("test_image.jpg")
+    associations = ListProperty([])
 
     def __init__(self, **kwargs):
         super(ImageController, self).__init__(**kwargs)
         self.gesture_points = []
         self.cursor_trail = None
+        self.current_annotation = None
+        self.current_time = 0.0
+        self.finished_region = None
+        self.previous_points = []
+        Clock.schedule_once(self.initialize, 0.1)
+
+    def initialize(self, dt):
         self.ids.speech_widget.bind(transcript=self.speech_transcript_completed)
+        self.ids.speech_widget.on_silence = self.finish_association
+        self.ids.done_button.set_hover_rgb(0, 0.8, 0.9)
+        self.ids.done_button.on_click = self.on_done_button_pressed
+        self.ids.redo_button.set_hover_rgb(1, 0, 0)
+        self.ids.redo_button.on_click = self.on_redo_button_pressed
+        self.ids.image_view.bind(image_size=self.on_image_size_changed)
+        self.ids.annotations_view.image_size = self.ids.image_view.image_size
+
+    def on_image_size_changed(self, instance, value):
+        self.ids.annotations_view.image_size = value
 
     def reset(self):
         self.segmentation = None
+        self.current_time = 0.0
         self.ids.speech_widget.reset()
+        self.previous_points = []
+        self.ids.image_view.overlay_source = ""
+
+    def on_image_src(self, instance, value):
+        if not value:
+            return
+        self.ids.annotations_view.annotations = []
+        self.current_annotation = None
+        self.gesture_points = []
+        self.associations = []
 
     def update(self, dt):
+        self.ids.done_button.update(dt)
+        self.ids.redo_button.update(dt)
         self.ids.speech_widget.update(dt)
         if not self.ids.speech_widget.is_recording:
             self.ids.speech_widget.start_recording()
+        self.current_time += dt
+        self.ids.done_button.disabled = (len(self.associations) == 0 or
+                                         self.ids.speech_widget.is_transcribing)
+        if self.ids.speech_widget.is_transcribing:
+            self.ids.done_button.text = "Transcribing..."
+        else:
+            self.ids.done_button.text = "I'm done with this image"
 
-    def on_image_src(self, instance, value):
-        self.ids.image_view.image_source = value
-
-    def update_palm(self, hand_pos):
+    def update_palm(self, hand_pos, depth):
+        self.ids.done_button.update_palm(hand_pos, depth)
+        self.ids.redo_button.update_palm(hand_pos, depth)
         if hand_pos is None:
             if self.cursor_trail:
                 self.cursor_trail.pop_point()
+            self.previous_points = []
+            if self.current_annotation:
+                self.current_annotation = None
+                del self.ids.annotations_view.annotations[-1]
+            self.gesture_points = []
             return
 
-        pos = np.array(hand_pos[:2])
-        leap_corner = np.array([-100.0, 100.0])
-        leap_size = np.array([200.0, 200.0])
-        screen_bounds = np.array(self.size)
-        self.cursor_pos = ((pos - leap_corner) * screen_bounds / leap_size).tolist()
+        image_pos = (hand_pos[0] - self.ids.image_view.pos[0],
+                     hand_pos[1] - self.ids.image_view.pos[1]) #convert_point(hand_pos, self, self.ids.image_view)
+        if depth <= 0.7:
+            self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
+                                         1 - depth), self.current_time))
 
-        leap_z = -100.0
-        leap_z_size = 200.0
-        cursor_max = 40.0
-        new_size = (hand_pos[2] - leap_z) * cursor_max / leap_z_size
-        self.cursor_size = float(np.clip(new_size, 0, cursor_max))
-
-        image_pos = convert_point(self.cursor_pos, self, self.ids.image_view)
-        if self.gesture_points:
-            # Add point to existing region
-            self.gesture_points.append(image_pos)
-        elif new_size <= cursor_max * 0.5 and not self.gesture_points:
-            self.gesture_points.append(image_pos)
+        if len(self.gesture_points) % 10 == 0 and len(self.gesture_points) > 10:
+            region = detect_region([x[0] for x in self.gesture_points],
+                                   self.ids.image_view.image_size,
+                                  (14, 14))
+            region = LabeledRegion(region, "", temporary=True)
+            if self.current_annotation is None:
+                self.current_annotation = region
+                self.ids.annotations_view.annotations.append(self.current_annotation)
+            else:
+                self.current_annotation = region
+                self.ids.annotations_view.annotations[-1] = self.current_annotation
 
         if not self.cursor_trail:
             self.cursor_trail = CursorTrail()
             self.ids.image_view.canvas.add(self.cursor_trail)
-        self.cursor_trail.add_point(image_pos, cursor_max - new_size, len(self.gesture_points) > 0)
+        self.cursor_trail.add_point(hand_pos, 20.0, len(self.gesture_points) > 0)
+
+        # Check for hold gesture
+        self.previous_points.append((self.current_time, hand_pos))
+        if self.previous_points[-1][0] - self.previous_points[0][0] > 1.5:
+            self.previous_points.pop(0)
+        if (self.previous_points[-1][0] - self.previous_points[0][0] >= 1.0 and
+            self.current_time >= 3.0 and
+            self.ids.speech_widget.had_sound and
+            len(self.gesture_points) > 10): # Make sure it doesn't trigger stopping immediately
+            xs = np.array([item[1][0] for item in self.previous_points])
+            ys = np.array([item[1][1] for item in self.previous_points])
+            if (np.max(xs) - np.min(xs) <= HOVER_TOLERANCE and
+                np.max(ys) - np.min(ys) <= HOVER_TOLERANCE):
+                self.finish_association()
+
+    def finish_association(self):
+        if len(self.gesture_points) > 20:
+            self.old_gesture_points = self.gesture_points
+            self.old_annotation = self.current_annotation
+            self.ids.speech_widget.stop_recording(True)
+        else:
+            self.ids.speech_widget.stop_recording(False)
+        self.gesture_points = []
+        self.current_annotation = None
+        self.reset()
+
+    def on_done_button_pressed(self):
+        self.segmentation = list(self.associations)
+
+    def on_redo_button_pressed(self):
+        self.ids.annotations_view.annotations = []
+        self.current_annotation = None
+        self.gesture_points = []
+        self.associations = []
+        self.reset()
 
     def speech_transcript_completed(self, instance, value):
-        if not value:
+        if not value or not value['transcript']:
             return
-        if self.gesture_points:
-            region = detect_region(self.gesture_points,
-                                   (int(self.ids.image_view.size[0]),
-                                    int(self.ids.image_view.size[1])))
-            region.save_image(CURSOR_RGB)
-        else:
-            region = None
+        region = detect_region([x[0] for x in self.old_gesture_points],
+                               self.ids.image_view.image_size,
+                              (14, 14))
+
+        # Determine what the most likely label is
+        nouns = list(find_nouns(value['transcript']))
+        if len(nouns) > 1:
+            os.system('say "I heard {}. Can you use just one noun this time?"'.format(' or '.join(nouns)))
+            self.reset()
+            if self.old_annotation:
+                self.ids.annotations_view.annotations.remove(self.old_annotation)
+                self.old_annotation = None
+            return
+        elif len(nouns) == 0:
+            os.system("say \"I didn't catch what that was. Can you try again?\"")
+            self.reset()
+            if self.old_annotation:
+                self.ids.annotations_view.annotations.remove(self.old_annotation)
+                self.old_annotation = None
+            return
+        label = nouns[0]
+        if label not in known_labels:
+            message_idx = np.random.choice(3)
+            if message_idx == 0:
+                os.system("say \"I've never seen a {} before. Cool!\"".format(label))
+            elif message_idx == 1:
+                os.system("say \"that's a {}. good to know!\"".format(label))
+            else:
+                os.system("say \"so that's what a {} looks like.\"".format(label))
+
+        region = LabeledRegion(region, label)
+        if self.old_annotation:
+            self.ids.annotations_view.annotations.remove(self.old_annotation)
+            self.old_annotation = None
+        if self.current_annotation:
+            del self.ids.annotations_view.annotations[-1]
+        self.ids.annotations_view.annotations.append(region)
+        if self.current_annotation:
+            self.ids.annotations_view.annotations.append(self.current_annotation)
+        self.associations.append({'speech': value, 'gesture': region,
+                                  'gesture_points': self.gesture_points})
         self.gesture_points = []
-        self.segmentation = {'speech': value, 'gesture': region}
+        self.reset()
