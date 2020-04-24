@@ -16,6 +16,72 @@ CHANNELS = 1
 RATE = 44100
 CHUNK = 1024
 
+class Transcriber:
+
+    def __init__(self):
+        self.job_callbacks = {}
+        self.job_count = 0
+        self.completed_jobs = {}
+        self.lock = threading.Lock()
+
+    def transcribe(self, audio_buffer, callback):
+        self.lock.acquire()
+        self.job_callbacks[self.job_count] = callback
+        t = threading.Thread(target=self._transcribe_worker, args=(self.job_count, audio_buffer))
+        t.start()
+        self.job_count += 1
+        self.lock.release()
+
+    def _transcribe_worker(self, job_id, audio_buffer):
+        client = speech_v1.SpeechClient()
+        config = {
+            "enable_word_time_offsets": True,
+            "language_code": "en-US",
+        }
+        audio = {"content": audio_buffer}
+
+        print("Recognizing...")
+        response = client.recognize(config, audio)
+
+        # The first result includes start and end time word offsets
+        # First alternative is the most probable result
+        # alternative = result.alternatives[0]
+        transcript = ', '.join([result.alternatives[0].transcript for result in response.results])
+        print(u"Transcript: {}".format(transcript))
+        # plt.figure()
+        # all_data = np.frombuffer(buf.getvalue(), dtype=np.int16).astype(float) / 32768
+        # plt.plot(all_data)
+        # plt.title(alternative.transcript)
+        # plt.show()
+        # Merge all results into one object
+        result_obj = {'transcript': transcript}
+        timestamps = []
+        for result in response.results:
+            for word in result.alternatives[0].words:
+                timestamps.append({
+                    'word': word.word,
+                    'start_time': word.start_time.seconds + word.start_time.nanos / 1e9,
+                    'end_time': word.end_time.seconds + word.end_time.nanos / 1e9
+                })
+        result_obj['timestamps'] = timestamps
+
+        self.lock.acquire()
+        self.completed_jobs[job_id] = result_obj
+        self.lock.release()
+
+    def call_callbacks(self):
+        self.lock.acquire()
+        for job_id, result in self.completed_jobs.items():
+            self.job_callbacks[job_id](result)
+
+        self.job_callbacks = {j: c for j, c in self.job_callbacks.items()
+                              if j not in self.completed_jobs}
+        self.completed_jobs = {}
+        self.lock.release()
+
+    def is_transcribing(self):
+        return len(self.job_callbacks) > 0
+
 class SpeechWidget(Widget):
     """
     Manages speech recording and transcription, as well as showing a speech indicator in the UI.
@@ -35,17 +101,11 @@ class SpeechWidget(Widget):
         self.amplitudes = []
         self.last_volumes = []
         self.is_recording = False
-        self.is_transcribing = False
         self.audio = pyaudio.PyAudio()
         self.reset()
         self.on_silence = None
-        #self.audio_queue = mp.Queue()
-        #self.transcript_queue = mp.Queue()
-        #self.transcription_process = mp.Process(target=speech_transcription_worker,
-        #                                        args=(self.audio_queue, self.transcript_queue,
-        #                                              os.environ['GOOGLE_APPLICATION_CREDENTIALS']))
-        #self.transcription_process.start()
-        self.lock = threading.Lock()
+        self.transcriber = Transcriber()
+        self.is_transcribing = False
 
     def reset(self):
         if self.is_recording:
@@ -65,7 +125,6 @@ class SpeechWidget(Widget):
         self.buffer.setframerate(RATE)
         self.stream = None
         self.is_recording = False
-        self.transcript = None
 
     def start_recording(self):
         # start Recording
@@ -109,7 +168,7 @@ class SpeechWidget(Widget):
             self.color = (*colorsys.hsv_to_rgb((1 - avg_volume) * 0.7, 0.6, 0.9), 1)
         return (None, pyaudio.paContinue)
 
-    def stop_recording(self, transcribe=True):
+    def stop_recording(self, transcribe=True, callback=None):
         if not self.is_recording:
             return
         print("Finished recording")
@@ -118,11 +177,10 @@ class SpeechWidget(Widget):
         self.stream.close()
         self.buffer.close()
         if transcribe:
-            self.is_transcribing = True
             buf = self.trim_audio()
             value = buf.getvalue()
-            t = threading.Thread(target=self.transcribe, args=(value,))
-            t.start()
+            assert callback, "Callback is required if transcribing"
+            self.transcriber.transcribe(value, callback)
 
     def on_num_bars(self, instance, value):
         # Set the frequencies and amplitudes
@@ -136,11 +194,8 @@ class SpeechWidget(Widget):
         #     self.stop_recording()
         #     self.should_stop_rec = False
 
-        # try:
-        #     transcript = self.transcript_queue.get_nowait()
-        #     self.transcript = transcript
-        # except:
-        #     pass
+        self.transcriber.call_callbacks()
+        self.is_transcribing = self.transcriber.is_transcribing()
 
         self.color_elem.rgba = self.color
         center_pos = (self.pos[0] + self.size[0] / 2, self.pos[1] + self.size[1] / 2)
@@ -201,46 +256,4 @@ class SpeechWidget(Widget):
         with open("test_output.wav", "wb") as file:
             file.write(buf.getvalue())
         return buf
-
-    def transcribe(self, value):
-        """Loads the audio from the current buffer and performs speech-to-text."""
-        print("Trimming")
-        client = speech_v1.SpeechClient()
-        config = {
-            "enable_word_time_offsets": True,
-            "language_code": "en-US",
-        }
-        audio = {"content": value}
-
-        print("Recognizing...")
-        response = client.recognize(config, audio)
-        print("Finished recognizing")
-
-        # The first result includes start and end time word offsets
-        # First alternative is the most probable result
-        # alternative = result.alternatives[0]
-        transcript = ', '.join([result.alternatives[0].transcript for result in response.results])
-        print(u"Transcript: {}".format(transcript))
-        # plt.figure()
-        # all_data = np.frombuffer(buf.getvalue(), dtype=np.int16).astype(float) / 32768
-        # plt.plot(all_data)
-        # plt.title(alternative.transcript)
-        # plt.show()
-        # Merge all results into one object
-        result_obj = {'transcript': transcript}
-        timestamps = []
-        for result in response.results:
-            for word in result.alternatives[0].words:
-                timestamps.append({
-                    'word': word.word,
-                    'start_time': word.start_time.seconds + word.start_time.nanos / 1e9,
-                    'end_time': word.end_time.seconds + word.end_time.nanos / 1e9
-                })
-        result_obj['timestamps'] = timestamps
-
-        self.lock.acquire()
-        self.transcript = result_obj
-        self.is_transcribing = False
-        self.lock.release()
-        #self.audio_queue.put_nowait(buf.getvalue())
 

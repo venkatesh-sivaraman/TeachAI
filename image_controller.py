@@ -1,4 +1,5 @@
 import kivy
+from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -46,14 +47,24 @@ label_colors = [
     (0, 1, 0, 0.3),
     (0, 0.6, 1, 0.3)
 ]
-temporary_color = (0.1, 0.1, 0.1, 0.5)
+temporary_color = (0.9, 0.9, 0.9, 0.8)
 known_labels = []
 
 class AnnotationsView(Widget):
     annotations = ListProperty([])
     image_size = ListProperty([0, 0])
 
+    def __init__(self, **kwargs):
+        super(AnnotationsView, self).__init__(**kwargs)
+        self.labels = {}
+
     def on_annotations(self, instance, value):
+        self._update_annotations(value)
+
+    def annotations_updated(self):
+        self._update_annotations(self.annotations)
+
+    def _update_annotations(self, value):
         self.canvas.clear()
 
         # Compute origin of image based on aspect ratio
@@ -64,11 +75,21 @@ class AnnotationsView(Widget):
             for region in self.annotations:
                 tile_width = self.image_size[0] / aspect_ratio / region.mask.shape[1]
                 tile_height = self.image_size[1] / aspect_ratio / region.mask.shape[0]
-                if region.label not in known_labels:
-                    known_labels.append(region.label)
                 if region.temporary:
                     Color(*temporary_color)
                 else:
+                    if region.label:
+                        if region.label not in known_labels:
+                            known_labels.append(region.label)
+                        # Add a text label
+                        if region not in self.labels:
+                            nonzero_locs = np.argwhere(region.mask)
+                            center = np.mean(nonzero_locs, axis=0)
+                            label = Label(pos=(int(start_x + center[1] * tile_width),
+                                               int(start_y - (center[0] + 1) * tile_height)),
+                                          text=region.label)
+                            self.add_widget(label)
+                            self.labels[region] = label
                     Color(*label_colors[known_labels.index(region.label) % len(label_colors)])
 
                 for y in range(region.mask.shape[0]):
@@ -77,6 +98,12 @@ class AnnotationsView(Widget):
                         Rectangle(pos=(start_x + x * tile_width,
                                        start_y - (y + 1) * tile_height),
                                   size=(tile_width, tile_height))
+
+        # Remove old labels
+        for r, l in self.labels.items():
+            if r not in value:
+                self.remove_widget(l)
+        self.labels = {r: l for r, l in self.labels.items() if r in value}
 
 class GestureDrawing(Widget):
 
@@ -238,14 +265,48 @@ class ImageController(FloatLayout):
 
     def finish_association(self):
         if len(self.gesture_points) > 20:
-            self.old_gesture_points = self.gesture_points
-            self.old_annotation = self.current_annotation
-            self.ids.speech_widget.stop_recording(True)
+            old_gesture_points = self.gesture_points
+            annotation = self.current_annotation
+            def cb(value):
+                if not value or not value['transcript']:
+                    return
+
+                label = self.get_label(value['transcript'])
+                if not label:
+                    self.ids.annotations_view.annotations.remove(annotation)
+                    return
+                annotation.label = label
+                annotation.temporary = False
+                self.ids.annotations_view.annotations_updated()
+                self.associations.append({'speech': value, 'gesture': annotation,
+                                          'gesture_points': old_gesture_points})
+
+            self.ids.speech_widget.stop_recording(True, cb)
         else:
             self.ids.speech_widget.stop_recording(False)
         self.gesture_points = []
         self.current_annotation = None
         self.reset()
+
+    def get_label(self, transcript):
+        nouns = list(find_nouns(transcript))
+        if len(nouns) > 1:
+            os.system('say "I heard {}. Can you use just one noun this time?"'.format(' or '.join(nouns)))
+            return None
+        elif len(nouns) == 0:
+            os.system("say \"I didn't catch what that was. Can you try again?\"")
+            return None
+
+        label = nouns[0]
+        if label not in known_labels:
+            message_idx = np.random.choice(3)
+            if message_idx == 0:
+                os.system("say \"I've never seen a {} before. Cool!\"".format(label))
+            elif message_idx == 1:
+                os.system("say \"that's a {}. good to know!\"".format(label))
+            else:
+                os.system("say \"so that's what a {} looks like.\"".format(label))
+        return label
 
     def on_done_button_pressed(self):
         self.segmentation = list(self.associations)
