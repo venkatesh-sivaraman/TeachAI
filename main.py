@@ -17,6 +17,7 @@ from speech import SpeechWidget
 from confirm_dialog import ConfirmDialog
 from button import LeapButton
 from point_util import *
+from paintbrush import *
 from classification import *
 import numpy as np
 import datetime

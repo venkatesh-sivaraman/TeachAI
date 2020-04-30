@@ -12,6 +12,7 @@ from point_util import *
 from region_detector import *
 from classification import *
 from labeling import *
+from paintbrush import *
 import PIL
 import time
 
@@ -164,7 +165,7 @@ class ImageController(FloatLayout):
     def __init__(self, **kwargs):
         super(ImageController, self).__init__(**kwargs)
         self.gesture_points = []
-        self.cursor_trail = None
+        #self.cursor_trail = None
         self.current_annotation = None
         self.current_time = 0.0
         self.finished_region = None
@@ -180,6 +181,10 @@ class ImageController(FloatLayout):
         self.ids.redo_button.on_click = self.on_redo_button_pressed
         self.ids.image_view.bind(image_size=self.on_image_size_changed)
         self.ids.annotations_view.image_size = self.ids.image_view.image_size
+        with self.canvas:
+            #BindTexture(source="test_image.jpg")
+            Color(0, 1, 1, 0.7)
+            self.cursor_halo = Rectangle(pos=(0, 0), size=(100, 100), source='blur_circle.png')
 
     def on_image_size_changed(self, instance, value):
         self.ids.annotations_view.image_size = value
@@ -190,6 +195,7 @@ class ImageController(FloatLayout):
         self.ids.speech_widget.reset()
         self.previous_points = []
         self.ids.image_view.overlay_source = ""
+        self.ids.paintbrush.clear()
 
     def on_image_src(self, instance, value):
         if not value:
@@ -206,8 +212,7 @@ class ImageController(FloatLayout):
         if not self.ids.speech_widget.is_recording:
             self.ids.speech_widget.start_recording()
         self.current_time += dt
-        self.ids.done_button.disabled = (len(self.associations) == 0 or
-                                         self.ids.speech_widget.is_transcribing)
+        self.ids.done_button.disabled = (not self.ids.speech_widget.had_sound)
         if self.ids.speech_widget.is_transcribing:
             self.ids.done_button.text = "Transcribing..."
         else:
@@ -217,8 +222,8 @@ class ImageController(FloatLayout):
         self.ids.done_button.update_palm(hand_pos, depth)
         self.ids.redo_button.update_palm(hand_pos, depth)
         if hand_pos is None:
-            if self.cursor_trail:
-                self.cursor_trail.pop_point()
+            #if self.cursor_trail:
+            #    self.cursor_trail.pop_point()
             self.previous_points = []
             if self.current_annotation:
                 self.current_annotation = None
@@ -232,22 +237,28 @@ class ImageController(FloatLayout):
             self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
                                          1 - depth), self.current_time))
 
-        if len(self.gesture_points) % 10 == 0 and len(self.gesture_points) > 10:
-            region = detect_region([x[0] for x in self.gesture_points],
-                                   self.ids.image_view.image_size,
-                                  (14, 14))
-            region = LabeledRegion(region, "", temporary=True)
-            if self.current_annotation is None:
-                self.current_annotation = region
-                self.ids.annotations_view.annotations.append(self.current_annotation)
-            else:
-                self.current_annotation = region
-                self.ids.annotations_view.annotations[-1] = self.current_annotation
+        # if len(self.gesture_points) % 10 == 0 and len(self.gesture_points) > 10:
+        #     region = detect_region([x[0] for x in self.gesture_points],
+        #                            self.ids.image_view.image_size,
+        #                           (14, 14))
+        #     region = LabeledRegion(region, "", temporary=True)
+        #     if self.current_annotation is None:
+        #         self.current_annotation = region
+        #         self.ids.annotations_view.annotations.append(self.current_annotation)
+        #     else:
+        #         self.current_annotation = region
+        #         self.ids.annotations_view.annotations[-1] = self.current_annotation
 
-        if not self.cursor_trail:
-            self.cursor_trail = CursorTrail()
-            self.ids.image_view.canvas.add(self.cursor_trail)
-        self.cursor_trail.add_point(hand_pos, 20.0, len(self.gesture_points) > 0)
+        # if not self.cursor_trail:
+        #     self.cursor_trail = CursorTrail()
+        #     self.ids.image_view.canvas.add(self.cursor_trail)
+        # self.cursor_trail.add_point(hand_pos, 20.0, len(self.gesture_points) > 0)
+        line_width = self.ids.paintbrush.add_point(hand_pos, 1 - depth)
+
+        # Add cursor halo
+        self.cursor_halo.pos = (hand_pos[0] - line_width / 2,
+                                hand_pos[1] - line_width / 2)
+        self.cursor_halo.size = (line_width, line_width)
 
         # Check for hold gesture
         self.previous_points.append((self.current_time, hand_pos))
@@ -265,8 +276,11 @@ class ImageController(FloatLayout):
 
     def finish_association(self):
         if len(self.gesture_points) > 20:
+            region = detect_region([x[0] for x in self.gesture_points],
+                                   self.ids.image_view.image_size,
+                                  (14, 14))
+            annotation  = LabeledRegion(region, "", temporary=True)
             old_gesture_points = self.gesture_points
-            annotation = self.current_annotation
             def cb(value):
                 if not value or not value['transcript']:
                     return
@@ -281,7 +295,7 @@ class ImageController(FloatLayout):
                 self.associations.append({'speech': value, 'gesture': annotation,
                                           'gesture_points': old_gesture_points})
 
-            self.ids.speech_widget.stop_recording(True, cb)
+            self.ids.speech_widget.stop_recording(False) #(True, cb)
         else:
             self.ids.speech_widget.stop_recording(False)
         self.gesture_points = []
