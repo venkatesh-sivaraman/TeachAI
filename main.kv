@@ -68,6 +68,21 @@
                 size_hint: 0.5, 1
                 id: done_button
                 disabled: True # disable until first annotation
+    FloatLayout:
+        canvas:
+            Color:
+                rgba: 0, 0, 0.1, 0.6
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        id: transcribing_overlay
+        pos: root.pos
+        size: root.size
+        disabled: True
+        opacity: 0.0
+        Label:
+            text: "Transcribing..."
+            pos_hint: {'center_x': 0.5, 'center_y': 0.5}
 
 <ImageContainer>:
     Image:

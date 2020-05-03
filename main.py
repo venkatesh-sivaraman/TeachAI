@@ -76,31 +76,31 @@ class MainWidget(FloatLayout):
     def image_controller_completed(self, instance, value):
         if not value:
             return
-#         self.current_data = value
-#         self.ids.confirm_dialog.opacity = 1.0
-#         self.ids.confirm_dialog.disabled = False
-#         self.ids.confirm_dialog.image_src = self.ids.image_controller.image_src
-#         self.ids.confirm_dialog.transcript = "\"{}\"".format(value['speech']['transcript'])
-# 
-#     def confirm_dialog_completed(self, confirmed):
-#         if confirmed:
-        out_path = os.path.join("fusion_data", "{}_{}.pkl".format(
-            os.path.basename(self.ids.image_controller.image_src),
-            datetime.datetime.now()
-        ))
-        with open(out_path, "wb") as file:
-            pickle.dump(value, file)
-        self.model.add_training_example(self.ids.image_controller.image_src,
-                                        [ann['gesture'] for ann in value])
+        self.current_data = value
+        self.ids.confirm_dialog.opacity = 1.0
+        self.ids.confirm_dialog.disabled = False
+        self.ids.confirm_dialog.image_src = self.ids.image_controller.image_src
+        self.ids.confirm_dialog.transcript = "\"{}\"".format(value['speech']['transcript'])
 
-        print("Completed")
-        self.ids.image_controller.image_src = self.image_sources[self.image_idx]
-        if self.image_idx >= 5:
-            self.model.predict_training_example(self.image_sources[self.image_idx])
-        self.image_idx += 1
+    def confirm_dialog_completed(self, confirmed):
+        if confirmed:
+            out_path = os.path.join("fusion_data", "{}_{}.pkl".format(
+                os.path.basename(self.ids.image_controller.image_src),
+                datetime.datetime.now()
+            ))
+            with open(out_path, "wb") as file:
+                pickle.dump(value, file)
+            self.model.add_training_example(self.ids.image_controller.image_src,
+                                            [ann['gesture'] for ann in value])
 
-        # self.ids.confirm_dialog.opacity = 0.0
-        # self.ids.confirm_dialog.disabled = True
+            print("Completed")
+            self.ids.image_controller.image_src = self.image_sources[self.image_idx]
+            if self.image_idx >= 5:
+                self.model.predict_training_example(self.image_sources[self.image_idx])
+            self.image_idx += 1
+
+        self.ids.confirm_dialog.opacity = 0.0
+        self.ids.confirm_dialog.disabled = True
         self.ids.image_controller.reset()
 
 class MainApp(App):

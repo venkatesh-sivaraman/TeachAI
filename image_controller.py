@@ -43,6 +43,11 @@ class ImageContainer(FloatLayout):
         return (point[0] / aspect_ratio + start_x,
                 (self.image_size[1] - point[1]) / aspect_ratio + start_y)
 
+    def convert_dimension_to_image(self, dim):
+        """Converts a single value to image coordinates."""
+        aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
+        return dim * aspect_ratio
+
 label_colors = [
     (1, 0, 0, 0.3),
     (0, 1, 0, 0.3),
@@ -209,9 +214,10 @@ class ImageController(FloatLayout):
         self.ids.done_button.update(dt)
         self.ids.redo_button.update(dt)
         self.ids.speech_widget.update(dt)
-        if not self.ids.speech_widget.is_recording:
-            self.ids.speech_widget.start_recording()
         self.current_time += dt
+        if not self.ids.speech_widget.is_recording:
+            self.current_time = 0.0
+            self.ids.speech_widget.start_recording()
         self.ids.done_button.disabled = (not self.ids.speech_widget.had_sound)
         if self.ids.speech_widget.is_transcribing:
             self.ids.done_button.text = "Transcribing..."
@@ -233,9 +239,6 @@ class ImageController(FloatLayout):
 
         image_pos = (hand_pos[0] - self.ids.image_view.pos[0],
                      hand_pos[1] - self.ids.image_view.pos[1]) #convert_point(hand_pos, self, self.ids.image_view)
-        if depth <= 0.7:
-            self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
-                                         1 - depth), self.current_time))
 
         # if len(self.gesture_points) % 10 == 0 and len(self.gesture_points) > 10:
         #     region = detect_region([x[0] for x in self.gesture_points],
@@ -254,6 +257,9 @@ class ImageController(FloatLayout):
         #     self.ids.image_view.canvas.add(self.cursor_trail)
         # self.cursor_trail.add_point(hand_pos, 20.0, len(self.gesture_points) > 0)
         line_width = self.ids.paintbrush.add_point(hand_pos, 1 - depth)
+        image_coord_line_width = self.ids.image_view.convert_dimension_to_image(line_width)
+        self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
+                                     1 - depth, image_coord_line_width), self.current_time))
 
         # Add cursor halo
         self.cursor_halo.pos = (hand_pos[0] - line_width / 2,
@@ -281,26 +287,37 @@ class ImageController(FloatLayout):
                                   (14, 14))
             annotation  = LabeledRegion(region, "", temporary=True)
             old_gesture_points = self.gesture_points
+            start_time = 0
             def cb(value):
+                self.ids.transcribing_overlay.opacity = 0.0
+                self.ids.transcribing_overlay.disabled = True
+
                 if not value or not value['transcript']:
                     return
+                # region = detect_region([x[0] for x in self.old_gesture_points],
+                #                        self.ids.image_view.image_size,
+                #                       (14, 14))
+                timestamped_points = [(x[1] - start_time, *x[0]) for x in old_gesture_points]
+                labels = label_region(timestamped_points, value, self.ids.image_view.image_size)
+                self.segmentation = labels
+                # label = self.get_label(value['transcript'])
+                # if not label:
+                #     self.ids.annotations_view.annotations.remove(annotation)
+                #     return
+                # annotation.label = label
+                # annotation.temporary = False
+                # self.ids.annotations_view.annotations_updated()
+                # self.associations.append({'speech': value, 'gesture': annotation,
+                #                           'gesture_points': old_gesture_points})
 
-                label = self.get_label(value['transcript'])
-                if not label:
-                    self.ids.annotations_view.annotations.remove(annotation)
-                    return
-                annotation.label = label
-                annotation.temporary = False
-                self.ids.annotations_view.annotations_updated()
-                self.associations.append({'speech': value, 'gesture': annotation,
-                                          'gesture_points': old_gesture_points})
-
-            self.ids.speech_widget.stop_recording(False) #(True, cb)
+            start_time = self.ids.speech_widget.stop_recording(True, cb)
         else:
             self.ids.speech_widget.stop_recording(False)
         self.gesture_points = []
         self.current_annotation = None
-        self.reset()
+        self.ids.transcribing_overlay.opacity = 1.0
+        self.ids.transcribing_overlay.disabled = False
+        # self.reset()
 
     def get_label(self, transcript):
         nouns = list(find_nouns(transcript))
@@ -333,48 +350,55 @@ class ImageController(FloatLayout):
         self.reset()
 
     def speech_transcript_completed(self, instance, value):
+        self.ids.transcribing_overlay.opacity = 0.0
+        self.ids.transcribing_overlay.disabled = True
+
         if not value or not value['transcript']:
             return
-        region = detect_region([x[0] for x in self.old_gesture_points],
-                               self.ids.image_view.image_size,
-                              (14, 14))
+        # region = detect_region([x[0] for x in self.old_gesture_points],
+        #                        self.ids.image_view.image_size,
+        #                       (14, 14))
+        timestamped_points = [(x[1], x[0][0], x[0][1], x[0][3]) for x in self.old_gesture_points]
+        label_region(timestamped_points, value, self.ids.image_view.image_size)
 
         # Determine what the most likely label is
-        nouns = list(find_nouns(value['transcript']))
-        if len(nouns) > 1:
-            os.system('say "I heard {}. Can you use just one noun this time?"'.format(' or '.join(nouns)))
-            self.reset()
-            if self.old_annotation:
-                self.ids.annotations_view.annotations.remove(self.old_annotation)
-                self.old_annotation = None
-            return
-        elif len(nouns) == 0:
-            os.system("say \"I didn't catch what that was. Can you try again?\"")
-            self.reset()
-            if self.old_annotation:
-                self.ids.annotations_view.annotations.remove(self.old_annotation)
-                self.old_annotation = None
-            return
-        label = nouns[0]
-        if label not in known_labels:
-            message_idx = np.random.choice(3)
-            if message_idx == 0:
-                os.system("say \"I've never seen a {} before. Cool!\"".format(label))
-            elif message_idx == 1:
-                os.system("say \"that's a {}. good to know!\"".format(label))
-            else:
-                os.system("say \"so that's what a {} looks like.\"".format(label))
+        # nouns = list(find_nouns(value['transcript']))
+        # if len(nouns) > 1:
+        #     os.system('say "I heard {}. Can you use just one noun this time?"'.format(' or '.join(nouns)))
+        #     self.reset()
+        #     if self.old_annotation:
+        #         self.ids.annotations_view.annotations.remove(self.old_annotation)
+        #         self.old_annotation = None
+        #     return
+        # elif len(nouns) == 0:
+        #     os.system("say \"I didn't catch what that was. Can you try again?\"")
+        #     self.reset()
+        #     if self.old_annotation:
+        #         self.ids.annotations_view.annotations.remove(self.old_annotation)
+        #         self.old_annotation = None
+        #     return
+        # label = nouns[0]
+        # if label not in known_labels:
+        #     message_idx = np.random.choice(3)
+        #     if message_idx == 0:
+        #         os.system("say \"I've never seen a {} before. Cool!\"".format(label))
+        #     elif message_idx == 1:
+        #         os.system("say \"that's a {}. good to know!\"".format(label))
+        #     else:
+        #         os.system("say \"so that's what a {} looks like.\"".format(label))
 
-        region = LabeledRegion(region, label)
-        if self.old_annotation:
-            self.ids.annotations_view.annotations.remove(self.old_annotation)
-            self.old_annotation = None
-        if self.current_annotation:
-            del self.ids.annotations_view.annotations[-1]
-        self.ids.annotations_view.annotations.append(region)
-        if self.current_annotation:
-            self.ids.annotations_view.annotations.append(self.current_annotation)
-        self.associations.append({'speech': value, 'gesture': region,
-                                  'gesture_points': self.gesture_points})
-        self.gesture_points = []
-        self.reset()
+        # region = LabeledRegion(region, label)
+        # if self.old_annotation:
+        #     self.ids.annotations_view.annotations.remove(self.old_annotation)
+        #     self.old_annotation = None
+        # if self.current_annotation:
+        #     del self.ids.annotations_view.annotations[-1]
+        # self.ids.annotations_view.annotations.append(region)
+        # if self.current_annotation:
+        #     self.ids.annotations_view.annotations.append(self.current_annotation)
+        # self.associations.append({'speech': value, 'gesture': region,
+        #                           'gesture_points': self.gesture_points})
+        # self.gesture_points = []
+        # self.reset()
+
+

@@ -177,10 +177,11 @@ class SpeechWidget(Widget):
         self.stream.close()
         self.buffer.close()
         if transcribe:
-            buf = self.trim_audio()
+            buf, start_time = self.trim_audio()
             value = buf.getvalue()
             assert callback, "Callback is required if transcribing"
             self.transcriber.transcribe(value, callback)
+            return start_time
 
     def on_num_bars(self, instance, value):
         # Set the frequencies and amplitudes
@@ -217,7 +218,9 @@ class SpeechWidget(Widget):
         self.current_time += dt
 
     def trim_audio(self):
-        """Trims the audio to get rid of likely silence."""
+        """Trims the audio to get rid of likely silence.
+
+        Returns the new audio buffer as well as the time (seconds) that was trimmed from the start."""
         # Load a numpy array with the audio
         in_buf = io.BytesIO(self.buffer_str.getvalue())
         wav_file = wave.open(in_buf, 'rb')
@@ -255,5 +258,5 @@ class SpeechWidget(Widget):
         out_wav.close()
         with open("test_output.wav", "wb") as file:
             file.write(buf.getvalue())
-        return buf
+        return buf, non_silence[0] * hop_size / RATE
 
