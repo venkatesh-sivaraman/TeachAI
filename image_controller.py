@@ -48,6 +48,11 @@ class ImageContainer(FloatLayout):
         aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
         return dim * aspect_ratio
 
+    def convert_dimension_from_image(self, dim):
+        """Converts a single value from image coordinates."""
+        aspect_ratio = max(self.image_size[0] / self.size[0], self.image_size[1] / self.size[1])
+        return dim / aspect_ratio
+
 label_colors = [
     (1, 0, 0, 0.3),
     (0, 1, 0, 0.3),
@@ -167,6 +172,8 @@ class ImageController(FloatLayout):
     image_src = StringProperty("test_image.jpg")
     associations = ListProperty([])
 
+    prompt = StringProperty("")
+
     def __init__(self, **kwargs):
         super(ImageController, self).__init__(**kwargs)
         self.gesture_points = []
@@ -209,6 +216,18 @@ class ImageController(FloatLayout):
         self.current_annotation = None
         self.gesture_points = []
         self.associations = []
+
+    def on_prompt(self, instance, value):
+        if not value:
+            return
+        def cb(dt):
+            recording = self.ids.speech_widget.is_recording
+            if recording:
+                self.ids.speech_widget.pause_recording()
+            self.speak(value)
+            if recording:
+                self.ids.speech_widget.resume_recording()
+        Clock.schedule_once(cb, 0.1)
 
     def update(self, dt):
         self.ids.done_button.update(dt)
@@ -256,29 +275,43 @@ class ImageController(FloatLayout):
         #     self.cursor_trail = CursorTrail()
         #     self.ids.image_view.canvas.add(self.cursor_trail)
         # self.cursor_trail.add_point(hand_pos, 20.0, len(self.gesture_points) > 0)
-        line_width = self.ids.paintbrush.add_point(hand_pos, 1 - depth)
-        image_coord_line_width = self.ids.image_view.convert_dimension_to_image(line_width)
-        self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
-                                     1 - depth, image_coord_line_width), self.current_time))
+        if self.segmentation or self.ids.speech_widget.is_transcribing: # finished
+            self.cursor_halo.size = (0, 0)
+        else:
+            line_width = self.ids.paintbrush.add_point(hand_pos, 1 - depth)
+            image_coord_line_width = self.ids.image_view.convert_dimension_to_image(line_width)
+            self.gesture_points.append(((*self.ids.image_view.convert_point_to_image(image_pos),
+                                         1 - depth, image_coord_line_width), self.current_time))
 
-        # Add cursor halo
-        self.cursor_halo.pos = (hand_pos[0] - line_width / 2,
-                                hand_pos[1] - line_width / 2)
-        self.cursor_halo.size = (line_width, line_width)
+            # Add cursor halo
+            self.cursor_halo.pos = (hand_pos[0] - line_width / 2,
+                                    hand_pos[1] - line_width / 2)
+            self.cursor_halo.size = (line_width, line_width)
 
         # Check for hold gesture
-        self.previous_points.append((self.current_time, hand_pos))
-        if self.previous_points[-1][0] - self.previous_points[0][0] > 1.5:
-            self.previous_points.pop(0)
-        if (self.previous_points[-1][0] - self.previous_points[0][0] >= 1.0 and
-            self.current_time >= 3.0 and
-            self.ids.speech_widget.had_sound and
-            len(self.gesture_points) > 10): # Make sure it doesn't trigger stopping immediately
-            xs = np.array([item[1][0] for item in self.previous_points])
-            ys = np.array([item[1][1] for item in self.previous_points])
-            if (np.max(xs) - np.min(xs) <= HOVER_TOLERANCE and
-                np.max(ys) - np.min(ys) <= HOVER_TOLERANCE):
-                self.finish_association()
+        # self.previous_points.append((self.current_time, hand_pos))
+        # if self.previous_points[-1][0] - self.previous_points[0][0] > 1.5:
+        #     self.previous_points.pop(0)
+        # if (self.previous_points[-1][0] - self.previous_points[0][0] >= 1.0 and
+        #     self.current_time >= 3.0 and
+        #     self.ids.speech_widget.had_sound and
+        #     len(self.gesture_points) > 10): # Make sure it doesn't trigger stopping immediately
+        #     xs = np.array([item[1][0] for item in self.previous_points])
+        #     ys = np.array([item[1][1] for item in self.previous_points])
+        #     if (np.max(xs) - np.min(xs) <= HOVER_TOLERANCE and
+        #         np.max(ys) - np.min(ys) <= HOVER_TOLERANCE):
+        #         self.finish_association()
+
+    def on_palm_close_gesture(self):
+        if not self.ids.speech_widget.had_sound:
+            self.speak("Can you describe this image?")
+            return
+        self.finish_association()
+
+    def speak(self, message):
+        self.ids.speech_widget.pause_recording()
+        os.system('say "{}"'.format(message))
+        self.ids.speech_widget.resume_recording()
 
     def finish_association(self):
         if len(self.gesture_points) > 20:
@@ -297,9 +330,14 @@ class ImageController(FloatLayout):
                 # region = detect_region([x[0] for x in self.old_gesture_points],
                 #                        self.ids.image_view.image_size,
                 #                       (14, 14))
-                timestamped_points = [(x[1] - start_time, *x[0]) for x in old_gesture_points]
+                timestamped_points = [(x[1] - start_time, x[0][0], x[0][1], x[0][3]) for x in old_gesture_points]
                 labels = label_region(timestamped_points, value, self.ids.image_view.image_size)
-                self.segmentation = labels
+                self.segmentation = {
+                    'labels': labels,
+                    'speech': value
+                }
+                self.ids.transcribing_overlay.opacity = 0.0
+                self.ids.transcribing_overlay.disabled = True
                 # label = self.get_label(value['transcript'])
                 # if not label:
                 #     self.ids.annotations_view.annotations.remove(annotation)
@@ -340,7 +378,8 @@ class ImageController(FloatLayout):
         return label
 
     def on_done_button_pressed(self):
-        self.segmentation = list(self.associations)
+        self.finish_association()
+        # self.segmentation = list(self.associations)
 
     def on_redo_button_pressed(self):
         self.ids.annotations_view.annotations = []

@@ -125,6 +125,7 @@ class SpeechWidget(Widget):
         self.buffer.setframerate(RATE)
         self.stream = None
         self.is_recording = False
+        self.is_paused = False
 
     def start_recording(self):
         # start Recording
@@ -137,7 +138,15 @@ class SpeechWidget(Widget):
                                       frames_per_buffer=CHUNK,
                                       stream_callback=self.update_recording)
 
+    def pause_recording(self):
+        self.is_paused = True
+
+    def resume_recording(self):
+        self.is_paused = False
+
     def update_recording(self, in_data, frame_count, time_info, status_flags):
+        if self.is_paused:
+            return (None, pyaudio.paContinue)
         arr = np.frombuffer(in_data, dtype=np.int16) / 32768
         self.buffer.writeframes(in_data)
         self.num_frames += 1

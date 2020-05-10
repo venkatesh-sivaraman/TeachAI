@@ -34,7 +34,7 @@
         Label:
             id: label_widget
             size_hint: 1, 0.1
-            text: "Describe and point to the animals in this image."
+            text: root.prompt
         BoxLayout:
             size_hint: 1, 0.1
             pos_hint: {'center_x': 0.5}
@@ -131,17 +131,29 @@
             pos: (self.pos[0] + self.size[0] / 2, self.pos[1])
             size: (self.size[0] / 2, self.size[1])
     BoxLayout:
-        pos: (0, 0)
+        pos: root.pos
         size: root.size
         orientation: "vertical"
+        id: parent_view
         Label:
             id: label_widget
             size_hint: 1, 0.2
             text: "Hover left to re-do, hover right to confirm."
-        ImageContainer:
-            image_source: root.image_src
+        FloatLayout:
             size_hint: 1, 0.6
-            id: image_view
+            ImageContainer:
+                image_source: root.image_src
+                pos_hint: {'x': 0, 'y': 0}
+                size_hint: (1, 1)
+                id: image_view
+            Widget:
+                pos_hint: {'x': 0, 'y': 0}
+                size_hint: (1, 1)
+                id: paintbrush_parent
+            Widget:
+                pos_hint: {'x': 0, 'y': 0}
+                size_hint: (1, 1)
+                id: label_parent
         Label:
             id: transcript_widget
             size_hint: 1, 0.2

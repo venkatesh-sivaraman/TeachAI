@@ -6,13 +6,16 @@ from kivy.graphics import Fbo, Color, Rectangle, Ellipse, BindTexture, Mesh, Lin
 from kivy.core.window import Window
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import deque
 
 DISTANCE_PER_POINT = 2.0
 MASK_INTERVAL = 2
 LINE_WIDTH_WINDOW = 10
 
 FADE_FACTOR = 2
-BASE_FADE = 0.5
+BASE_FADE = 0.2
+
+AUTOCORRELATION_WINDOW = 128
 
 mask_shader = """
 $HEADER$
@@ -55,6 +58,11 @@ void main(void) {
 }
 """
 
+# 0 = inverse speed
+# 1 = depth
+# 2 = periodicity + depth
+PAINTBRUSH_MODE = 0
+
 class Paintbrush(Widget):
     def __init__(self, **kwargs):
         super(Paintbrush, self).__init__(**kwargs)
@@ -67,11 +75,18 @@ class Paintbrush(Widget):
         self.cap_vertices_index = 0
         self.cap_indices_index = 0
         self.mask_lines = []
+        self.mask_alphas = []
         self.canvas = RenderContext()
         self.canvas.shader.fs = mask_shader
         self.buffer_container = None
+        self.rgb = (0, 1, 1)
         # We'll update our glsl variables in a clock
         Clock.schedule_interval(self.update_glsl, 0)
+
+        # Maintain a window of history for autocorrelations
+        self.ac_window = []
+        self.ac_position = 0
+        self.periodicity_factor = 1.0
 
     def update_glsl(self, *largs):
         # This is needed for the default vertex shader.
@@ -83,7 +98,7 @@ class Paintbrush(Widget):
         with self.canvas:
             self.fbo = Fbo(size=value)
             self.mask_fbo = Fbo(size=(value[0] // 5, value[1] // 5), clear_color=(1, 1, 1, 1))
-            Color(0, 1, 1, 0.9)
+            Color(*self.rgb, 0.9)
             BindTexture(texture=self.mask_fbo.texture, index=1)
             self.buffer_container = Rectangle(pos=self.pos, size=value, texture=self.fbo.texture)
             #Rectangle(pos=self.pos, size=value, texture=self.mask_fbo.texture)
@@ -186,17 +201,48 @@ class Paintbrush(Widget):
         max_dist = 140.0
         last_point = self.points[-1]
         old_point = self.points[max(0, len(self.points) - window)]
-        dist = np.linalg.norm(np.array([last_point[0], last_point[1]]) -
-                              np.array([old_point[0], old_point[1]]))
-        depth_factor = 1 / (1 + np.exp(-(depth - 0.5) * 4))
-        return np.clip((max_dist - dist) * (max_width - min_width) / (max_dist - min_dist) *
-                       depth_factor,
-                       min_width, max_width)
+        if PAINTBRUSH_MODE == 0:
+            dist = np.linalg.norm(np.array([last_point[0], last_point[1]]) -
+                                  np.array([old_point[0], old_point[1]]))
+        else:
+            dist = 120.0
+        width = (max_dist - dist) * (max_width * 0.8 - min_width) / (max_dist - min_dist)
+        if PAINTBRUSH_MODE != 0:
+            depth_factor = 1 / (1 + np.exp(-(depth - 0.5) * 4))
+            width *= depth_factor
+            if PAINTBRUSH_MODE == 2:
+                width *= self.periodicity_factor
+        return np.clip(width, min_width, max_width)
 
-    def add_point(self, point, depth):
+    def update_periodicity(self, point):
+        """Computes a new autocorrelation magnitude by adding the given point."""
+        self.ac_window.append(point)
+        if len(self.ac_window) > AUTOCORRELATION_WINDOW:
+            del self.ac_window[0]
+        self.ac_position += 1
+        if self.ac_position % 8 == 0 and len(self.ac_window) == AUTOCORRELATION_WINDOW:
+            ac_window = np.array(self.ac_window)
+            x_fft = np.abs(np.fft.rfft(ac_window[:,0] * np.hanning(AUTOCORRELATION_WINDOW)))
+            y_fft = np.abs(np.fft.rfft(ac_window[:,1] * np.hanning(AUTOCORRELATION_WINDOW)))
+            x_fft = x_fft[4:20] / np.mean(x_fft[4:20])
+            y_fft = y_fft[4:20] / np.mean(y_fft[4:20])
+            # if self.ac_position > 200:
+            #     plt.figure()
+            #     plt.subplot(121)
+            #     plt.plot(ac_window[:,0], ac_window[:,1])
+            #     plt.subplot(122)
+            #     plt.plot(x_fft, label='x')
+            #     plt.plot(y_fft, label='y')
+            #     plt.show()
+            self.periodicity_factor = ((max(1.0, np.max(x_fft) / 4.0) *
+                                        max(1.0, np.max(y_fft) / 4.0)) - 1) ** 2 + 1
+
+
+    def add_point(self, point, depth=None, width=None, alpha=None):
         """
         point: a point in window space to add to the paintbrush trajectory (x, y).
         depth: a 0-1 value indicating the depth into the screen of the current point.
+        alpha: a manual 0-1 alpha level for this point.
 
         Returns the current line width.
         """
@@ -206,13 +252,15 @@ class Paintbrush(Widget):
         # Build a segment of line
         line_width = 0
         if len(self.points) > 2:
-            line_width = self.current_line_width(depth)
+            self.update_periodicity(point)
+            line_width = self.current_line_width(depth) if depth is not None else width
             old_line_width = (sum(self.line_widths) / len(self.line_widths)
                               if self.line_widths else line_width)
             self.line_widths.append(line_width)
             if len(self.line_widths) > LINE_WIDTH_WINDOW:
                 self.line_widths.pop(0)
-            line_width = sum(self.line_widths) / len(self.line_widths)
+            if width is None:
+                line_width = sum(self.line_widths) / len(self.line_widths)
             # Clamp the amount by which the line width can change - results in
             # smoother lines
             # line_width = old_line_width + np.clip(line_width - old_line_width, -2.0, 2.0)
@@ -227,13 +275,18 @@ class Paintbrush(Widget):
                                                     self.points[-1][0] / 5,
                                                     self.points[-1][1] / 5),
                                            width=(line_width + 8.0) / 10))
+                if alpha is not None:
+                    self.mask_alphas.append(alpha)
                 with self.mask_fbo:
                     self.mask_fbo.clear()
                     self.mask_fbo.clear_buffer()
-                    white_values = 1 / (1 + np.exp(-((np.arange(len(self.mask_lines)) -
-                                                     len(self.mask_lines)) / FADE_FACTOR + 3)))
-                    white_values = white_values * (1 - BASE_FADE) + BASE_FADE
-                    for white, line in zip(white_values, self.mask_lines):
+                    if len(self.mask_alphas) == len(self.mask_lines):
+                        white_values = self.mask_alphas
+                    else:
+                        white_values = 1 / (1 + np.exp(-((np.arange(len(self.mask_lines)) -
+                                                         len(self.mask_lines)) / FADE_FACTOR + 3)))
+                        white_values = white_values * (1 - BASE_FADE) + BASE_FADE
+                    for i, (white, line) in enumerate(zip(white_values, self.mask_lines)):
                         Color(white, white, white, 1)
                         self.mask_fbo.add(line)
 
@@ -259,9 +312,13 @@ class Paintbrush(Widget):
         self.indices = []
         self.mesh.vertices = []
         self.mesh.indices = []
+        self.periodicity_factor = 1.0
+        self.ac_window = []
+        self.ac_position = 0
         with self.fbo:
             self.fbo.clear_buffer()
         self.mask_lines = []
+        self.mask_colors = []
         with self.mask_fbo:
             self.mask_fbo.clear()
             self.mask_fbo.clear_buffer()

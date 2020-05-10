@@ -24,7 +24,8 @@ import datetime
 import pickle
 
 # controller = Leap.Controller()
-IMAGE_BASE = "/Users/venkatesh-sivaraman/Documents/School/MIT/6-835/coco/val2017"
+IMAGE_BASE = "/Users/venkatesh-sivaraman/Documents/School/MIT/6-835/fp/dog_breeds/flat"
+#IMAGE_BASE = "/Users/venkatesh-sivaraman/Documents/School/MIT/6-835/coco/val2017"
 
 class MainWidget(FloatLayout):
     cursor_pos = ListProperty([0, 0])
@@ -35,16 +36,19 @@ class MainWidget(FloatLayout):
 
     def __init__(self, **kwargs):
         super(MainWidget, self).__init__(**kwargs)
-        with open("coco_cat_dog_imgs.txt", "r") as file:
+        with open("dog_breed_files.txt", "r") as file: # "coco_cat_dog_imgs.txt"
             fnames = [line.strip() for line in file.readlines()]
         self.image_sources = [os.path.join(IMAGE_BASE, fn) for fn in fnames]
         random.shuffle(self.image_sources)
         self.ids.image_controller.image_src = self.image_sources[0]
+        def cb(dt):
+            self.ids.image_controller.prompt = "How do I tell what dog breed this is?"
+        Clock.schedule_once(cb, 0.3)
         self.image_idx += 1
         self.ids.image_controller.bind(segmentation=self.image_controller_completed)
         self.current_data = None
         self.model = ClassificationModel("/Users/venkatesh-sivaraman/Downloads/small-bigger-autoencoder-09-0.0029.hdf5")
-        # self.ids.confirm_dialog.on_confirm = self.confirm_dialog_completed
+        self.ids.confirm_dialog.on_confirm = self.confirm_dialog_completed
 
     def update(self, dt):
         self.ids.image_controller.update(dt)
@@ -67,11 +71,14 @@ class MainWidget(FloatLayout):
         leap_z_size = 200.0
         cursor_max = 40.0
         new_size = (hand_pos[2] - leap_z) * cursor_max / leap_z_size
-        self.cursor_size = float(np.clip(new_size, 0, cursor_max))
+        self.cursor_size = float(cursor_max - np.clip(new_size, 0, cursor_max))
         self.ids.image_controller.update_palm(self.cursor_pos,
                                               self.cursor_size / cursor_max)
         self.ids.confirm_dialog.update_palm(self.cursor_pos,
                                               self.cursor_size / cursor_max)
+
+    def on_palm_close_gesture(self):
+        self.ids.image_controller.on_palm_close_gesture()
 
     def image_controller_completed(self, instance, value):
         if not value:
@@ -81,32 +88,34 @@ class MainWidget(FloatLayout):
         self.ids.confirm_dialog.disabled = False
         self.ids.confirm_dialog.image_src = self.ids.image_controller.image_src
         self.ids.confirm_dialog.transcript = "\"{}\"".format(value['speech']['transcript'])
+        self.ids.confirm_dialog.labels = value['labels']
 
     def confirm_dialog_completed(self, confirmed):
         if confirmed:
-            out_path = os.path.join("fusion_data", "{}_{}.pkl".format(
+            out_path = os.path.join("breed_fusion_data", "{}_{}.pkl".format(
                 os.path.basename(self.ids.image_controller.image_src),
                 datetime.datetime.now()
             ))
             with open(out_path, "wb") as file:
-                pickle.dump(value, file)
-            self.model.add_training_example(self.ids.image_controller.image_src,
-                                            [ann['gesture'] for ann in value])
+                pickle.dump(self.current_data, file)
 
             print("Completed")
             self.ids.image_controller.image_src = self.image_sources[self.image_idx]
-            if self.image_idx >= 5:
-                self.model.predict_training_example(self.image_sources[self.image_idx])
+            # if self.image_idx >= 5:
+            #     self.model.predict_training_example(self.image_sources[self.image_idx])
             self.image_idx += 1
 
         self.ids.confirm_dialog.opacity = 0.0
         self.ids.confirm_dialog.disabled = True
+        self.ids.confirm_dialog.reset()
         self.ids.image_controller.reset()
 
 class MainApp(App):
 
     def on_start(self):
         self.event = Clock.schedule_interval(self.update, 1 / 30.)
+        self.finger_history = []
+        self.time_since_palm_close = -1
 
     def on_stop(self):
         Clock.unschedule(self.event)
@@ -120,6 +129,22 @@ class MainApp(App):
         frame = getLeapFrame()
         # frame = controller.frame()
         loc = frame.hands[0].palm_pos # leap_one_palm(frame)
+
+        # get distance to average
+        # fingers = frame.hands[0].fingers
+        # center = sum(fingers) / len(fingers)
+        # openness = np.mean([np.linalg.norm(f - center) for f in fingers])
+        # if len(self.finger_history) < 50:
+        #     self.finger_history.append(openness)
+        # elif openness < np.mean(self.finger_history) * 0.6:
+        #     if self.time_since_palm_close < 0:
+        #         self.time_since_palm_close = 0.0
+        #     else:
+        #         self.time_since_palm_close += dt
+        #         if self.time_since_palm_close >= 0.5:
+        #             self.main_widget.on_palm_close_gesture()
+        #             self.time_since_palm_close = -1
+
         if not all(x == 0 for x in loc):
             self.main_widget.update_palm(loc)
         else:

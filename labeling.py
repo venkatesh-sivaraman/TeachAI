@@ -36,7 +36,7 @@ class LabeledMask:
 lemmatizer = WordNetLemmatizer()
 
 WORD_TIMESTAMP_MARGIN = 1.0 # seconds around the word start and end to grab as part of the label
-DEBUG = False
+DEBUG = True
 
 def find_nouns(phrase):
     tokens = nltk.word_tokenize(phrase)
@@ -83,9 +83,9 @@ def label_region(gesture_points, transcript, image_size):
 
     ges_x = [x[1] for x in gesture_points]
     ges_y = [x[2] for x in gesture_points]
-    ges_widths = np.array([x[3] for x in gesture_points]) / 2
+    ges_widths = np.array([x[3] for x in gesture_points])
 
-    timestamps = extend_word_timestamps(word_tokenize_timestamps(transcript["timestamps"]))
+    timestamps = word_tokenize_timestamps(transcript["timestamps"])
     pos_tags = nltk.pos_tag([token["word"] for token in timestamps])
 
     if DEBUG:
@@ -93,12 +93,8 @@ def label_region(gesture_points, transcript, image_size):
         plt.scatter(ges_x, ges_y, color='r', s=ges_widths)
         plt.plot(ges_x, ges_y, linestyle='-', color='r')
         for token, (_, pos) in zip(timestamps, pos_tags):
-            if not pos.startswith("N") and not pos.startswith("J") and not pos.startswith("A"):
-                continue
-            if token["word"].lower() in exclude_words:
-                continue
-
-            sub_x, sub_y, _ = trajectory(np.linspace(token["start_time"], token["end_time"], 10))
+            sub_x, sub_y, _ = trajectory(np.linspace(token["start_time"] - WORD_TIMESTAMP_MARGIN,
+                                                     token["end_time"] + WORD_TIMESTAMP_MARGIN, 10))
             plt.plot(sub_x, sub_y, linestyle='-', marker='o')
             plt.text(np.mean(sub_x), np.mean(sub_y), token["word"])
         plt.show()
@@ -114,7 +110,7 @@ def label_region(gesture_points, transcript, image_size):
             continue
         sub_x, sub_y, sub_widths = trajectory(
             np.linspace(token["start_time"] - WORD_TIMESTAMP_MARGIN,
-                        token["end_time"] + WORD_TIMESTAMP_MARGIN, 15))
+                        token["end_time"] + WORD_TIMESTAMP_MARGIN, 30))
         mask_intensities = np.hanning(len(sub_x))
         if word in labels:
             prob_mat = labels[word].mask
@@ -136,7 +132,8 @@ def label_region(gesture_points, transcript, image_size):
                          np.exp(-0.5 * (col_offsets[np.newaxis,:] ** 2 / variance))) * intensity
             strokes[-1].append((x, y, width))
 
-        center = (np.mean(sub_x), np.mean(sub_y))
+        center = (np.sum(sub_x * sub_widths / np.sum(sub_widths)),
+                  np.sum(sub_y * sub_widths / np.sum(sub_widths)))
         # Normalize
         labels[word] = LabeledMask(token["word"], prob_mat, centers + [center], strokes)
 
@@ -147,8 +144,8 @@ def label_region(gesture_points, transcript, image_size):
 
     if DEBUG:
         plt.figure()
-        for k, label in enumerate(labels):
-            plt.subplot(int(len(labels) // 3) + 1, 3, k + 1)
+        for k, label in enumerate(label_list):
+            plt.subplot(int(len(label_list) // 3) + 1, 3, k + 1)
             plt.imshow(label.mask)
             plt.title(label.label)
         plt.tight_layout()
