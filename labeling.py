@@ -17,6 +17,20 @@ exclude_words = [
     "part",
     "section",
     "area"
+    "correct",
+    "wrong",
+    "incorrect",
+    "well",
+    "good",
+    "bad",
+    "guess",
+    "try",
+    "explanation",
+    "reason",
+    "yes",
+    "no",
+    "other",
+    "another"
 ]
 
 class LabeledMask:
@@ -36,7 +50,7 @@ class LabeledMask:
 lemmatizer = WordNetLemmatizer()
 
 WORD_TIMESTAMP_MARGIN = 1.0 # seconds around the word start and end to grab as part of the label
-DEBUG = True
+DEBUG = False
 
 def find_nouns(phrase):
     tokens = nltk.word_tokenize(phrase)
@@ -88,7 +102,12 @@ def label_region(gesture_points, transcript, image_size):
     timestamps = word_tokenize_timestamps(transcript["timestamps"])
     pos_tags = nltk.pos_tag([token["word"] for token in timestamps])
 
+    # Sometimes the timestamps get out of sync
+    if abs(timestamps[-1]["end_time"] - t[-1]) >= 5.0:
+        return []
+
     if DEBUG:
+        print(timestamps, t)
         plt.figure()
         plt.scatter(ges_x, ges_y, color='r', s=ges_widths)
         plt.plot(ges_x, ges_y, linestyle='-', color='r')
@@ -126,6 +145,7 @@ def label_region(gesture_points, transcript, image_size):
             variance = width * (prob_dim / image_size[0] + prob_dim / image_size[1]) / 2.0
             prob_x = x * prob_dim / image_size[0]
             prob_y = y * prob_dim / image_size[1]
+            if prob_x < 0 or prob_x >= prob_dim or prob_y < 0 or prob_y >= prob_dim: continue
             row_offsets = np.maximum(0, np.abs(np.arange(prob_dim) - prob_y) - 1)
             col_offsets = np.maximum(0, np.abs(np.arange(prob_dim) - prob_x) - 1)
             prob_mat += (np.exp(-0.5 * (row_offsets[:,np.newaxis] ** 2 / variance)) *

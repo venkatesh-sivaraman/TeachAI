@@ -224,7 +224,9 @@ class SpeechWidget(Widget):
             else:
                 bar.pos = (origin_pos[0] + i * self.bar_width, origin_pos[1] + height)
             bar.size = (self.bar_width, np.abs(height))
-        self.current_time += dt
+
+        if self.is_recording and not self.is_paused:
+            self.current_time += dt
 
     def trim_audio(self):
         """Trims the audio to get rid of likely silence.

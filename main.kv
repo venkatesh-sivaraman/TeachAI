@@ -10,6 +10,11 @@
             size_hint: (1, 1)
             opacity: 0.0
             disabled: True
+        StartView:
+            id: start_view
+            pos_hint: {'x': 0, 'y': 0}
+            size_hint: (1, 1)
+            opacity: 1.0
     Widget:
         pos: (0, 0)
         size: root.size
@@ -92,12 +97,13 @@
         size_hint: (1, 1)
         source: root.image_source
     Image:
-        opacity: 1 if root.overlay_source else 0
+        opacity: 0
         allow_stretch: True
         keep_ratio: True
         pos_hint: {'x': 0, 'y': 0}
         size_hint: (1, 1)
         source: root.overlay_source
+        id: overlay
 
 <GestureDrawing>:
     canvas:
@@ -112,6 +118,33 @@
 <SpeechWidget>:
     num_bars: 9
     color: 0.5, 0.5, 0.5, 1
+
+<StartView>:
+    canvas:
+        Color:
+            rgba: 0, 0, 0.1, 0.9
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    BoxLayout:
+        pos: root.pos
+        size: root.size
+        orientation: "vertical"
+        id: parent_view
+        Label:
+            id: label_widget
+            size_hint: 1, 0.2
+            text: "[size=96]Welcome[/size]"
+            markup: True
+        Label:
+            size_hint: 1, 0.3
+            text: "Make sure you're comfortable using the Leap to control the cursor, then get started."
+        Widget:
+            size_hint: 1, 0.4
+        LeapButton:
+            id: start_button
+            size_hint: 1, 0.1
+            text: "Hover here to start!"
 
 <ConfirmDialog>:
     canvas:
