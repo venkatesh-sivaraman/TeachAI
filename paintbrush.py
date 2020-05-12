@@ -20,30 +20,6 @@ AUTOCORRELATION_WINDOW = 128
 mask_shader = """
 $HEADER$
 
-vec4 blur13(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
-  vec4 color = vec4(0.0);
-  vec2 off1 = vec2(1.411764705882353) * direction;
-  vec2 off2 = vec2(3.2941176470588234) * direction;
-  vec2 off3 = vec2(5.176470588235294) * direction;
-  color += texture2D(image, uv) * 0.1964825501511404;
-  color += texture2D(image, uv + (off1 / resolution)) * 0.2969069646728344;
-  color += texture2D(image, uv - (off1 / resolution)) * 0.2969069646728344;
-  color += texture2D(image, uv + (off2 / resolution)) * 0.09447039785044732;
-  color += texture2D(image, uv - (off2 / resolution)) * 0.09447039785044732;
-  color += texture2D(image, uv + (off3 / resolution)) * 0.010381362401148057;
-  color += texture2D(image, uv - (off3 / resolution)) * 0.010381362401148057;
-  return color;
-}
-
-vec4 blur5(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
-  vec4 color = vec4(0.0);
-  vec2 off1 = vec2(1.3333333333333333) * direction;
-  color += texture2D(image, uv) * 0.29411764705882354;
-  color += texture2D(image, uv + (off1 / resolution)) * 0.35294117647058826;
-  color += texture2D(image, uv - (off1 / resolution)) * 0.35294117647058826;
-  return color;
-}
-
 // New uniform that will receive texture at index 1
 uniform sampler2D texture1;
 
@@ -53,8 +29,7 @@ void main(void) {
     // currently, both will use exactly the same texture coordinates.
     gl_FragColor = frag_color * \
         texture2D(texture0, tex_coord0) * \
-        vec4(1, 1, 1, texture2D(texture1, tex_coord0).x); // blur13(texture1, tex_coord0, vec2(1), vec2(1, 0)).g);
-        //texture2D(texture1, tex_coord0).x;
+        vec4(1, 1, 1, texture2D(texture1, tex_coord0).x);
 }
 """
 

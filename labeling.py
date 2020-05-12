@@ -3,6 +3,7 @@ import nltk
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+import PIL
 
 exclude_words = [
     "top", # TODO can we improve region detection using these words?
@@ -84,7 +85,7 @@ def word_tokenize_timestamps(timestamps):
             })
     return result
 
-def label_region(gesture_points, transcript, image_size):
+def label_region(gesture_points, transcript, image_size, image=None):
     """
     gesture_points: a list of (t, x, y, width) points describing the path of the user's hand relative to
         the image coordinate system in time (seconds relative to the start of recording).
@@ -108,14 +109,23 @@ def label_region(gesture_points, transcript, image_size):
 
     if DEBUG:
         print(timestamps, t)
-        plt.figure()
-        plt.scatter(ges_x, ges_y, color='r', s=ges_widths)
-        plt.plot(ges_x, ges_y, linestyle='-', color='r')
+        plt.figure(figsize=(5, 5), dpi=240)
+        if image:
+            plt.imshow(image)
+        plt.scatter(ges_x, ges_y, color='0.7', s=ges_widths * 0.1)
+        plt.plot(ges_x, ges_y, linestyle='-', color='0.7')
         for token, (_, pos) in zip(timestamps, pos_tags):
+            if not pos.startswith("N") and not pos.startswith("J") and not pos.startswith("A"):
+                continue
             sub_x, sub_y, _ = trajectory(np.linspace(token["start_time"] - WORD_TIMESTAMP_MARGIN,
                                                      token["end_time"] + WORD_TIMESTAMP_MARGIN, 10))
-            plt.plot(sub_x, sub_y, linestyle='-', marker='o')
-            plt.text(np.mean(sub_x), np.mean(sub_y), token["word"])
+            plt.plot(sub_x, sub_y, linestyle='-', marker='.', label=token["word"])
+            #plt.text(np.mean(sub_x), np.mean(sub_y), token["word"])
+        plt.xlim(0, image_size[0])
+        plt.ylim(image_size[1], 0)
+        plt.xticks([])
+        plt.yticks([])
+        plt.legend()
         plt.show()
 
     prob_dim = 24
@@ -163,10 +173,14 @@ def label_region(gesture_points, transcript, image_size):
                                       label.centers, label.strokes))
 
     if DEBUG:
-        plt.figure()
+        plt.figure(figsize=(6, 4), dpi=240)
         for k, label in enumerate(label_list):
             plt.subplot(int(len(label_list) // 3) + 1, 3, k + 1)
-            plt.imshow(label.mask)
+            mask = np.array(PIL.Image.fromarray((label.mask * 255.).astype(np.uint8)).resize(image_size)) / 255.
+            masked_img = (mask.reshape((*mask.shape, 1)) * np.array(image) / 255.)
+            plt.imshow(masked_img, vmin=0, vmax=1)
+            plt.xticks([])
+            plt.yticks([])
             plt.title(label.label)
         plt.tight_layout()
         plt.show()

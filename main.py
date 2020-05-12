@@ -27,7 +27,9 @@ import numpy as np
 import datetime
 import pickle
 
-IMAGE_BASE = "/Users/venkatesh-sivaraman/Documents/School/MIT/6-835/fp/dog_breeds/flat"
+PRETRAINING_DIR = os.path.abspath("pretraining")
+IMAGE_BASE = os.path.abspath("training_data")
+OUTPUT_DIR = "fusion_output"
 
 class MainWidget(FloatLayout):
     cursor_pos = ListProperty([0, 0])
@@ -40,13 +42,11 @@ class MainWidget(FloatLayout):
         super(MainWidget, self).__init__(**kwargs)
         self.ids.image_controller.bind(segmentation=self.image_controller_completed)
         self.current_data = None
-        self.model = ClassificationModel(
-            "/Users/venkatesh-sivaraman/Documents/School/MIT/6-835/fp/initial_dog_data",
-            IMAGE_BASE)
+        self.model = ClassificationModel(PRETRAINING_DIR, IMAGE_BASE)
         self.ids.confirm_dialog.on_confirm = self.confirm_dialog_completed
 
         # Present the first image
-        with open("dog_breed_files.txt", "r") as file:
+        with open(os.path.join(IMAGE_BASE, "filenames.txt"), "r") as file:
             fnames = [line.strip() for line in file.readlines()]
         self.image_sources = [os.path.join(IMAGE_BASE, fn) for fn in fnames]
         random.shuffle(self.image_sources)
@@ -60,7 +60,7 @@ class MainWidget(FloatLayout):
         self.ids.start_view.disabled = True
         while self.model.has_used_image(self.image_sources[self.image_idx]):
             self.image_idx += 1
-        self.present_image(self.image_sources[0])
+        self.present_image(self.image_sources[self.image_idx])
         self.image_idx += 1
 
     def update(self, dt):
@@ -144,7 +144,9 @@ class MainWidget(FloatLayout):
     def confirm_dialog_completed(self, confirmed):
         if confirmed:
             self.model.add_training_point(self.ids.image_controller.image_src, self.current_data['labels'])
-            out_path = os.path.join("breed_fusion_data", "{}_{}.pkl".format(
+            if not os.path.exists(OUTPUT_DIR):
+                os.mkdir(OUTPUT_DIR)
+            out_path = os.path.join(OUTPUT_DIR, "{}_{}.pkl".format(
                 os.path.basename(self.ids.image_controller.image_src),
                 datetime.datetime.now()
             ))
@@ -165,6 +167,8 @@ class MainWidget(FloatLayout):
 class MainApp(App):
 
     def on_start(self):
+        if not os.path.exists("tmp"):
+            os.mkdir("tmp")
         self.event = Clock.schedule_interval(self.update, 1 / 30.)
         self.finger_history = []
         self.time_since_palm_close = -1
@@ -179,23 +183,7 @@ class MainApp(App):
     def update(self, dt):
         self.main_widget.update(dt)
         frame = getLeapFrame()
-        # frame = controller.frame()
-        loc = frame.hands[0].palm_pos # leap_one_palm(frame)
-
-        # get distance to average
-        # fingers = frame.hands[0].fingers
-        # center = sum(fingers) / len(fingers)
-        # openness = np.mean([np.linalg.norm(f - center) for f in fingers])
-        # if len(self.finger_history) < 50:
-        #     self.finger_history.append(openness)
-        # elif openness < np.mean(self.finger_history) * 0.6:
-        #     if self.time_since_palm_close < 0:
-        #         self.time_since_palm_close = 0.0
-        #     else:
-        #         self.time_since_palm_close += dt
-        #         if self.time_since_palm_close >= 0.5:
-        #             self.main_widget.on_palm_close_gesture()
-        #             self.time_since_palm_close = -1
+        loc = frame.hands[0].palm_pos
 
         if not all(x == 0 for x in loc):
             self.main_widget.update_palm(loc)

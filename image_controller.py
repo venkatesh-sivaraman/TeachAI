@@ -142,8 +142,6 @@ class ImageController(FloatLayout):
         Clock.schedule_once(self.initialize, 0.1)
 
     def initialize(self, dt):
-        #self.ids.speech_widget.bind(transcript=self.speech_transcript_completed)
-        #self.ids.speech_widget.on_silence = self.finish_association
         self.ids.done_button.set_hover_rgb(0, 0.8, 0.9)
         self.ids.done_button.on_click = self.on_done_button_pressed
         self.ids.redo_button.set_hover_rgb(1, 0, 0)
@@ -258,7 +256,8 @@ class ImageController(FloatLayout):
                     return
 
                 timestamped_points = [(x[1] - start_time, x[0][0], x[0][1], x[0][3]) for x in old_gesture_points]
-                labels = label_region(timestamped_points, value, self.ids.image_view.image_size)
+                labels = label_region(timestamped_points, value, self.ids.image_view.image_size,
+                                     image=PIL.Image.open(self.ids.image_view.image_source))
                 if not labels:
                     self.speak("I didn't get that. Could you try again?")
                     self.on_redo_button_pressed()
