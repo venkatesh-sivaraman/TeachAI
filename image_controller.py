@@ -9,7 +9,6 @@ from kivy.clock import Clock
 from kivy.graphics import Ellipse, Color, Rectangle
 import numpy as np
 from point_util import *
-from region_detector import *
 from classification import *
 from labeling import *
 from paintbrush import *
