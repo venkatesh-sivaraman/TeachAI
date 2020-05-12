@@ -134,7 +134,7 @@
         Label:
             id: label_widget
             size_hint: 1, 0.2
-            text: "[size=96]Welcome[/size]"
+            text: "[size=96]Welcome to TeachAI[/size]"
             markup: True
         Label:
             size_hint: 1, 0.3
@@ -153,16 +153,6 @@
         Rectangle:
             pos: self.pos
             size: self.size
-        Color:
-            rgba: self.left_color
-        Rectangle:
-            pos: self.pos
-            size: (self.size[0] / 2, self.size[1])
-        Color:
-            rgba: self.right_color
-        Rectangle:
-            pos: (self.pos[0] + self.size[0] / 2, self.pos[1])
-            size: (self.size[0] / 2, self.size[1])
     BoxLayout:
         pos: root.pos
         size: root.size
@@ -171,9 +161,9 @@
         Label:
             id: label_widget
             size_hint: 1, 0.2
-            text: "Hover left to re-do, hover right to confirm."
+            text: "Please confirm that I understood you correctly (small typos aren't important)."
         FloatLayout:
-            size_hint: 1, 0.6
+            size_hint: 1, 0.5
             ImageContainer:
                 image_source: root.image_src
                 pos_hint: {'x': 0, 'y': 0}
@@ -190,7 +180,18 @@
         Label:
             id: transcript_widget
             size_hint: 1, 0.2
-            text: "Transcript: " + root.transcript
+            text: "You said: " + root.transcript
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint: 1, 0.1
+            LeapButton:
+                text: "Let's do that again"
+                size_hint: 0.5, 1
+                id: redo_button
+            LeapButton:
+                text: "Looks good to me!"
+                size_hint: 0.5, 1
+                id: done_button
 
 <LeapButton>:
     canvas:

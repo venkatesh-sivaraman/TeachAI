@@ -12,9 +12,9 @@ from PIL import Image as PILImage
 class StartView(Widget):
     def __init__(self, **kwargs):
         super(StartView, self).__init__(**kwargs)
-        Clock.schedule_once(self.initialize, 0.1)
         self.on_start = None
         self.current_time = 0.0
+        Clock.schedule_once(self.initialize, 0.1)
 
     def initialize(self, dt):
         self.ids.start_button.set_hover_rgb(0, 0.8, 0)

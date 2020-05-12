@@ -3,7 +3,7 @@ from kivy.uix.widget import Widget
 import numpy as np
 
 HOVER_DURATION = 1.0
-HOVER_TOLERANCE = 40.0
+HOVER_TOLERANCE = 60.0
 REFRACTORY_PERIOD = 3.0
 
 class LeapButton(Widget):

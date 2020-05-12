@@ -165,6 +165,8 @@ class ImageController(FloatLayout):
         self.previous_points = []
         self.ids.image_view.overlay_source = ""
         self.ids.paintbrush.clear()
+        self.ids.transcribing_overlay.opacity = 0.0
+        self.ids.transcribing_overlay.disabled = True
 
     def on_image_src(self, instance, value):
         if not value:
@@ -200,9 +202,10 @@ class ImageController(FloatLayout):
             self.ids.done_button.text = "I'm done with this image"
 
     def update_palm(self, hand_pos, depth):
-        self.ids.done_button.update_palm(hand_pos, depth)
-        self.ids.redo_button.update_palm(hand_pos, depth)
-        if hand_pos is None:
+        if not self.ids.speech_widget.is_transcribing and not self.disabled:
+            self.ids.done_button.update_palm(hand_pos, depth)
+            self.ids.redo_button.update_palm(hand_pos, depth)
+        if hand_pos is None or self.disabled:
             self.previous_points = []
             if self.current_annotation:
                 self.current_annotation = None
@@ -264,8 +267,6 @@ class ImageController(FloatLayout):
                     'labels': labels,
                     'speech': value
                 }
-                self.ids.transcribing_overlay.opacity = 0.0
-                self.ids.transcribing_overlay.disabled = True
 
             start_time = self.ids.speech_widget.stop_recording(True, cb)
         else:

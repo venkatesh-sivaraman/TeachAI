@@ -98,8 +98,6 @@ class ClassificationModel:
 
     def has_used_image(self, image_path):
         """Returns true if the given image path is already in the training set."""
-        print("Checking for", os.path.basename(image_path), set([os.path.basename(p.file_path) for p in
-                                                             self.patches]))
         return any(os.path.basename(p.file_path) == os.path.basename(image_path) for p in self.patches)
 
     def img_to_array(self, img):
